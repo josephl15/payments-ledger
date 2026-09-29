@@ -12,6 +12,7 @@ import org.springframework.boot.context.properties.EnableConfigurationProperties
 import org.springframework.boot.test.context.runner.ApplicationContextRunner;
 import org.springframework.context.ConfigurableApplicationContext;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.core.env.StandardEnvironment;
 
 /**
  * The application must refuse to start without a usable JWT secret, instead of running with a missing or guessable
@@ -35,7 +36,13 @@ class JwtSecretFailFastTest {
 
     @Test
     void aMissingSecretStopsTheContextFromStarting() {
-        runner.run(context -> assertThat(context).hasFailed());
+        // Take the operating system environment out of the picture before the settings are bound: otherwise a developer
+        // who has exported LEDGER_JWT_SECRET in their shell (as the README tells them to) would supply the secret and
+        // this test, which is about a MISSING secret, would fail on their machine.
+        runner.withInitializer(context -> context.getEnvironment()
+                        .getPropertySources()
+                        .remove(StandardEnvironment.SYSTEM_ENVIRONMENT_PROPERTY_SOURCE_NAME))
+                .run(context -> assertThat(context).hasFailed());
     }
 
     @Test
