@@ -5,6 +5,8 @@ bin/
 .idea/
 *.iml
 .env
+.env.*
+!.env.example
 # Tool artifacts (not project source)
 .gsd/
 .claude/worktrees/
