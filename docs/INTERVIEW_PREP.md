@@ -1,6 +1,55 @@
 # Interview prep
 
-Each entry: what it is in plain words, why it is built this way here, the trade-off, and questions an interviewer is likely to ask with short model answers. Later phases append to this file. Everything below describes code that exists in the repository; the pointers name the file to open.
+A study guide for explaining this project out loud. Start with "Read this first". After that the file is a reference: numbered entries (what it is in plain words, why it is built this way here, the trade-off, and likely questions with short model answers) and walkthroughs of the files that matter for each area. Everything describes code that exists in the repository; the pointers name the file to open.
+
+## Read this first
+
+### The 90-second pitch (say it in your own words)
+
+"I built a small payments ledger in Java and Spring Boot. It records money moving between accounts the way a bank's books do: double-entry, so every movement is written as entries that add up to zero, and the history can never be edited, which the database itself enforces. The interesting part is keeping it correct when things go wrong. Two transfers on the same account at the same moment can overwrite each other, so I lock the accounts in a fixed order inside the transaction, and I wrote a test that fires a thousand random transfers from sixteen threads at a real PostgreSQL and checks that no money was created or lost. I committed that test failing first against a version without the lock, then made it pass. If a client retries a request, a unique database constraint guarantees it only runs once, and I tested twenty identical requests at the same instant. Login uses BCrypt and JWT, and a user can only see their own accounts. It is a learning project: one currency, simulated deposits, no real payment rails, and I know exactly what it does not do."
+
+### The six invariants, one line each
+
+1. Every transaction's entries add up to zero: money always comes from somewhere and goes somewhere.
+2. All entries in the system add up to zero (follows from 1, and reconciliation checks it).
+3. A customer balance never goes below zero: checked on the locked row, with a database CHECK as a backstop.
+4. Entries are never changed or deleted: database triggers refuse it.
+5. A retried request with the same idempotency key runs at most once: a unique constraint decides.
+6. A transfer is atomic: all its writes happen or none do.
+
+Where each is tested is in the README table. What is honestly missing: reversals, an audit log and an admin reconciliation endpoint were dropped from scope.
+
+### The order to study things
+
+1. Entries 1, 2, 3 and 5: what double-entry is, why pence as integers, what `@Transactional` does, why system accounts are special.
+2. Entries 7 to 12 (the concurrency block, with the Phase 4 walkthrough): lost update, `FOR UPDATE`, deadlock and lock order, pessimistic versus optimistic, reconciliation. This is the centrepiece; be able to draw the two-transfer race on paper.
+3. Entries 13 to 19 (the idempotency block, with the Phase 5 walkthrough): why a unique constraint, the simultaneous-duplicate case, the rollback-only pitfall.
+4. Entries 20 to 25 (authentication): JWT step by step, BCrypt, CSRF, 401 versus 403 versus 404, the secret.
+5. Entries 26 to 29 (the four open questions: growing beyond one database, real money, the hardest bug, use of AI) and the glossary at the bottom.
+6. Then open the code with the walkthroughs (the "four files that matter" sections) and read each file once, out loud.
+
+For each area, do this before an interview: explain it without notes, then open the test that proves it and explain what the test does and why it can fail.
+
+### Where the twelve standard questions are answered
+
+| # | Question | Answer |
+|---|----------|--------|
+| 1 | Why double-entry instead of a balance column? | Entry 1 |
+| 2 | What isolation level, and what anomaly without the row locks? | Entries 7 and 8 (READ COMMITTED, the lost update) and 12 (REPEATABLE READ for reconciliation) |
+| 3 | Why lock accounts in id order? | Entry 9 |
+| 4 | Why pessimistic rather than optimistic locking here? | Entry 10 |
+| 5 | How does idempotency behave when two identical requests arrive at once? | Entries 14 and 15 |
+| 6 | What happens if the server crashes between the debit and the credit? | Entry 3 (one transaction, rolled back) and `AtomicityIntegrationTest` |
+| 7 | Why integers in pence rather than floats or `BigDecimal`? | Entry 2 |
+| 8 | Why not lock the system funding account, and the trade-off? | Entry 5 |
+| 9 | How would you grow this beyond one database and one busy account? | Entry 26 |
+| 10 | What would you change before putting real money through it? | Entry 27 |
+| 11 | What was the hardest bug and how was it found? | Entry 28 |
+| 12 | Which parts did you use AI tools for, and how did you verify them? | Entry 29 |
+
+A glossary of the terms used is at the end of this file.
+
+---
 
 ## Walkthrough: the four files that matter for money movement (Phase 3)
 
@@ -26,7 +75,7 @@ The HTTP edge is thin: `TransferController` maps JSON to a `TransferCommand` and
 **Likely questions**
 - *Why not just a balance column?* A bare balance has no history and no way to tell whether it is right. With entries you can recompute it, audit it, and prove nothing was created or destroyed.
 - *What keeps the cached balance honest?* It changes only inside `LedgerPostingService.post`, in the same transaction as the entries, and a database `CHECK` stops it going negative. Reconciliation (Phase 4) recomputes it from entries and reports any difference.
-- *How do you correct a mistake?* You never edit or delete an entry; you post a new reversing transaction (planned, not built yet).
+- *How do you correct a mistake?* You never edit or delete an entry; you post a new reversing transaction (not built: reversals were dropped from scope and are a possible extension).
 
 ## 2. Integers in pence, never floating point
 
@@ -384,3 +433,106 @@ Anyone can read a token (it is only encoded, not encrypted) but nobody without t
 **Likely questions**
 - *What are the weaknesses of your login?* No rate limiting, no revocation before expiry, registration reveals taken usernames, role changes wait for the next login.
 - *What happens to a stolen token?* It works until it expires; the short lifetime limits the damage.
+
+---
+
+## The four open questions
+
+## 26. How would you grow this beyond one database and one busy account?
+
+**Plain words.** Be honest first: nothing here was load-tested or measured for throughput, and it runs against one PostgreSQL instance, so any answer is reasoning, not a result. Then give the reasoning. There are two different problems.
+
+1. **Many accounts, moderate traffic each.** Transfers on different accounts do not block each other (they lock different rows), so throughput mostly grows with the database's capacity and the connection pool. The first steps would be a bigger database machine, tuning the connection pool against the database's limit, and reading history from a read replica (reads of a cached balance must still come from the primary if they must be current). Beyond one machine, the usual idea is to split (shard) accounts by account id, but a transfer between accounts on different shards can no longer be one local database transaction, which is a large redesign (sagas or a two-phase approach), not a configuration change.
+2. **One very busy account (a hot row).** Row locking makes transfers on that account queue, so its throughput is bounded by how fast one transaction can commit. Options: keep transactions very short, batch small movements, or split one logical account into several sub-accounts and sum them. The system funding account was designed so it is never locked at all (entry 5).
+
+**Why here.** The design choices made now (locking only customer accounts, one ordered lock statement, short transactions, no network calls inside a transaction) are the ones that make these later steps possible; none of the later steps was built.
+
+**Likely questions**
+- *Would optimistic locking help with a hot account?* No, it gets worse: many conflicting attempts fail and retry (entry 10).
+- *What does the application being stateless buy you?* Any number of application instances can serve requests because the JWT needs no server-side session and the database constraint and row locks arbitrate between instances. Concurrency was only tested with one instance, so say it follows from the design and was not tested.
+- *What breaks first?* Probably the connection pool or one hot account. I would measure before guessing.
+
+## 27. What would you change before putting real money through it?
+
+Group the answer; do not recite a list.
+
+- **Real payment rails and money flows.** Deposits here are simulated. Real money means integration with a bank or payment provider, settlement and failure handling, and regulatory obligations (safeguarding, authorisation, anti-money-laundering checks) that this project does not touch.
+- **Corrections and audit.** Reversals (a new mirror-image transaction, at most once) and an append-only audit log of who did what, including denied attempts. Both were designed and left out of scope; the schema has tables for them but no code.
+- **Authentication hardening.** Refresh tokens and revocation (a token cannot be recalled before it expires today), login rate limiting and lockout, HTTPS in front of the app, rotating the signing key from a secrets manager (entries 24 and 25).
+- **Database privileges.** The append-only triggers can be disabled by the table owner. Separate database roles, so the application's role cannot alter or drop them, and backups with tested restores.
+- **Observability.** Structured logs with request and transaction ids (never bodies or tokens), metrics and alerts (failed transfers, lock waits, replay counts), and a scheduled reconciliation whose failure raises an alarm.
+- **Load and failure testing.** Measure throughput and latency, test with several application instances and a failing database, and test the lock timeout behaviour under real overload.
+- **Idempotency housekeeping.** A job to delete expired keys, a decision on 409 "in progress" versus blocking a connection for a slow duplicate (entries 15 and 19).
+- **Framework upgrade.** Move from Spring Boot 3.5, whose free security patches ended (docs/DECISIONS.md, entry 1), to the supported 4.1 line.
+
+**Likely question.** *Which of those would you do first?* Corrections and audit, then observability: with money, being able to explain and repair every movement matters more than speed.
+
+## 28. What was the hardest bug, and how was it found?
+
+Use a real one from `docs/CV_EVIDENCE.md`. Three good candidates, in the order I would choose them:
+
+1. **The silent drift that no exception announced (Phase 4).** With the row lock deliberately missing, 1,000 concurrent transfers left the cached balances adding up to 148,784 pence when 100,000 existed, every account's cache disagreed with its entries, and one account was overdrawn in the ledger while its cache looked fine. No exception was thrown and the database CHECK never fired, because every wrong number was still a valid number. It was found by writing the concurrency test first and reading its numbers rather than trusting "no errors": that is why there is a reconciliation check that recomputes from entries. (docs/evidence/phase-4-red-naive-lock.txt.) Honest framing: this was the bug in the deliberately naive version, found on purpose, not a bug that shipped.
+2. **A secret printed in a startup error (Phase 6).** With only `@Size(min = 32)` on the JWT secret property, Spring's error message for a 31-character secret includes `rejected value [<the secret>]`, so a nearly-right real secret would have been written to the log. Found by a test that starts the real application with a short secret and asserts the error text does not contain it; fixed by checking the length in the record constructor with a message that has no value in it.
+3. **A test that failed only on a developer's machine (final check).** The clean-clone check exported `LEDGER_JWT_SECRET` as the README instructs, and `aMissingSecretStopsTheContextFromStarting` then failed, because the operating system's environment supplied the secret the test wanted to be absent. Fixed by removing the OS environment from that test's context. Lesson: a test's result should not depend on what the developer happens to have exported.
+
+Method to describe: reproduce it in a test, read the actual numbers or the actual error text, fix, and keep the test.
+
+## 29. Which parts did you use AI tools for, and how did you verify them?
+
+Answer plainly; this question is a test of honesty.
+
+**What happened.** An AI coding assistant (Claude Code) wrote most of the code, tests and documents in this repository, working from a project brief and instructions I gave it phase by phase. I chose the scope, the technology, the invariants and the order of the work, decided what to keep, and stopped after each phase to review. I am a mechanical engineering student who is new to Java, so I did not write the Java line by line myself, and I say so.
+
+**How it was verified, without trusting the AI.**
+- **Tests against a real database, not mocks.** Every claim is a test that runs against a real PostgreSQL in a container, and the numbers in the docs come from saved command output, not from memory (docs/CV_EVIDENCE.md, docs/evidence/).
+- **Red then green.** The concurrency test was committed failing first against the version without the lock, then passed after the fix, so it is known to detect the problem.
+- **Mutation checks.** Tests were made to fail on purpose (alternating lock order for deadlock, idempotency key unique per request, `@Transactional` removed) to show they are not vacuous. Some of these checks were done by hand and are recorded as manual, not automated.
+- **Reading and explaining.** Each phase has a walkthrough of the four files that matter and an explanation in plain words; the point of this file is that I can explain each one without the assistant. Anything I cannot explain, I do not list on my CV.
+- **A clean-clone run.** The repository was cloned fresh and built, tested and started with Docker Compose from the README's instructions, which found one real problem (entry 28, item 3).
+
+**What not to say.** Do not say the AI "just helped". Do not claim to have hand-written the code. Do say what you decided, what you can explain, and how you checked it.
+
+**Likely questions**
+- *Could you have built it without the AI?* Not this fast and not at this depth in Java yet; the value for me is that I understand the design well enough to explain it and to change it.
+- *What did the AI get wrong?* Point to a real example: the first version of the JWT secret check would have printed a near-miss secret into the startup error, and a test caught it (entry 28); and tests written first can pass for the wrong reason until they are made to fail on purpose (see "A concurrency test that cannot fail").
+- *How would you review AI-written code you did not write?* The same way as this project: read the change, find the test that would fail if it were wrong, run it, and break the code on purpose to check the test.
+
+---
+
+## Glossary
+
+- **Account (customer / system).** A customer account belongs to a user and has a cached balance. A system account (`EXTERNAL_FUNDING`, `EXTERNAL_PAYOUTS`) stands for the outside world, has no owner and no cached balance, and is never locked.
+- **Append-only.** Rows can be added but never changed or removed. Here enforced by database triggers on `ledger_entries` and `audit_log`.
+- **Atomic.** All of a set of changes happen, or none do.
+- **Balance, cached balance.** What an account holds. The truth is the sum of its entries; the cached balance is a stored copy kept in step in the same transaction and checked by reconciliation.
+- **BCrypt.** A deliberately slow password hash with a random salt built in.
+- **Bearer token.** A credential sent as `Authorization: Bearer <token>`; whoever holds it is treated as the user.
+- **CHECK constraint.** A rule the database evaluates on every write (for example balance not below zero).
+- **Concurrency.** Many requests in progress at the same time.
+- **CSRF.** An attack that makes a browser send an authenticated request using cookies it attaches automatically. Not relevant when the credential is a header the browser does not add by itself.
+- **Deadlock.** Two transactions each holding a lock the other needs. PostgreSQL aborts one (SQLSTATE 40P01).
+- **Double-entry.** Each movement is recorded as two or more signed entries that sum to zero.
+- **Entry (ledger entry).** One signed amount posted to one account as part of a transaction. Negative is a debit, positive a credit.
+- **Flyway.** A tool that applies numbered SQL migration files, so the database schema is versioned in git.
+- **`FOR UPDATE`.** A SELECT that also locks the rows it returns until the transaction ends.
+- **Hot row.** One row many transactions must update, so they queue on it.
+- **Idempotent, idempotency key.** Doing it twice has the same effect as once. The key is a client-chosen unique value that lets the server recognise a retry.
+- **Invariant.** A statement that must always be true of the data.
+- **Isolation level.** How much one transaction sees of others running at the same time. READ COMMITTED (the default) sees committed data only, per statement. REPEATABLE READ sees one snapshot for the whole transaction. SERIALIZABLE behaves as if transactions ran one at a time.
+- **JWT.** A signed token `header.payload.signature` carrying the user id and an expiry. Signed, not encrypted.
+- **Lost update.** Two transactions read the same value and both write back a result based on it, so one write disappears.
+- **Minor units.** The smallest currency unit (pence). 1,250 is 12.50 GBP.
+- **Optimistic locking.** No lock; a version number detects a conflicting write, and the loser retries.
+- **Pessimistic locking.** Lock first so competitors wait. Used here.
+- **Persistence context.** Hibernate's per-transaction memory of the entities it has loaded.
+- **Problem+json (RFC 7807).** A standard JSON shape for HTTP errors (`type`, `title`, `status`, `detail`).
+- **Reconciliation.** Recomputing what the system claims (sums, balances) from the entries and comparing. It reports and never fixes.
+- **Rollback-only.** A flag on a Spring transaction meaning it can only roll back, set when something inside it threw.
+- **Row lock.** A lock on one row of a table.
+- **Salt.** Random data mixed into a password hash so equal passwords differ.
+- **SQLSTATE.** A five-character code identifying a database error (23505 unique violation, 23514 check violation, 40P01 deadlock, 55P03 lock timeout, P0001 raised by a trigger).
+- **Stateless.** The server keeps nothing between requests; each carries its own proof (the token).
+- **Testcontainers.** A library that starts a real database in a Docker container from inside a test.
+- **Transaction (database).** A unit of work that commits fully or rolls back fully. Not to be confused with a ledger transaction, which is the business event (a deposit or a transfer) that owns a set of entries.
+- **Trigger.** A function the database runs automatically when a row is inserted, updated or deleted.
+- **Unique constraint.** A rule the database enforces so no two rows share a value; the mechanism behind the idempotency guarantee.
