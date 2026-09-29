@@ -1,0 +1,52 @@
+# Runs the full build and test suite on every push and every pull request, on any branch.
+#
+# There is deliberately no database "services:" block: the integration tests start their own PostgreSQL
+# through Testcontainers, using the Docker that comes preinstalled on ubuntu-latest.
+#
+# The "Report test count" step exists because a JUnit Platform misconfiguration makes Gradle report success
+# with zero tests run, which would give a green check that proves nothing. The step fails the job in that
+# case and leaves the count as an annotation and in the job summary.
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - uses: gradle/actions/setup-gradle@v6
+
+      - name: Build and test
+        run: ./gradlew build
+
+      - name: Report test count
+        if: always()
+        run: |
+          total=$(grep -h -o '<testsuite [^>]*' build/test-results/test/*.xml 2>/dev/null \
+            | grep -o ' tests="[0-9]*"' | grep -o '[0-9]*' | awk '{s+=$1} END {print s+0}')
+          echo "Tests run: $total"
+          echo "::notice title=Test count::Tests run: $total"
+          echo "### Tests run: $total" >> "$GITHUB_STEP_SUMMARY"
+          if [ "$total" -eq 0 ]; then echo "No tests ran"; exit 1; fi
+
+      - name: Upload test reports
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: test-reports
+          path: |
+            build/reports/tests/test
+            build/test-results/test
