@@ -4,9 +4,9 @@ A Java 21 / Spring Boot backend service that records money movement between acco
 
 ## Status
 
-In progress: Phases 1 and 2 of 8 are built (setup and toolchain; schema, triggers and domain model). The app boots against PostgreSQL 16, integration tests run on a real PostgreSQL through Testcontainers, and `docker compose up` gives a healthy stack (app plus database). CI workflow committed, not yet observed running.
+In progress: Phases 1 to 3 are built (setup and toolchain; schema, triggers and domain model; accounts, deposits and transfers). The app boots against PostgreSQL 16, integration tests run on a real PostgreSQL through Testcontainers, and `docker compose up` gives a healthy stack (app plus database). CI workflow committed, not yet observed running.
 
-The database schema exists (users, accounts, ledger transactions and entries, idempotency keys, audit log) with append-only triggers on the ledger and audit tables, and the JPA entities and repositories map it. There is still no API and no service that moves money; transfers arrive in Phase 3. See docs/architecture.md for the data model.
+What works now: open, list and view GBP accounts; simulated deposits; transfers between customer accounts, each written as balanced double-entry lines (sum zero) with the cached balance updated in the same database transaction; no overdraft (422); errors as RFC 7807 problem+json. What does not exist yet: real locking for concurrent requests (the lock step is deliberately a plain read until Phase 4, so simultaneous transfers on one account can lose updates), idempotency keys, login (the caller is identified by an unauthenticated `X-Acting-User-Id` header stub, so nothing is secured), reversals and history. See docs/architecture.md for the data model and docs/INTERVIEW_PREP.md for a walkthrough.
 
 ## Run it
 
@@ -45,7 +45,7 @@ Details, the Windows PowerShell form and troubleshooting are in docs/LEARNING_NO
 
 ## Known limitations and next steps
 
-- No money movement until Phase 3; the append-only triggers stop application bugs and casual SQL but not a privileged database administrator (the table owner can disable them); the rule that each transaction sums to zero is enforced by the service and checked by reconciliation, not by the database; authentication is not added until Phase 6, so nothing built before then is secured.
+- Concurrency safety arrives in Phase 4 (today the lock step is a plain read); the append-only triggers stop application bugs and casual SQL but not a privileged database administrator (the table owner can disable them); the rule that each transaction sums to zero is enforced by the service and checked by reconciliation, not by the database; authentication is not added until Phase 6, so nothing built before then is secured.
 - Upgrade from Spring Boot 3.5 to 4.1.x is a possible next step.
 - Possible extensions outside the current scope: multi-currency and FX; real payment rails or open banking; Kafka, the outbox pattern or microservices; a frontend; rate limiting, Prometheus metrics and tracing; interest, fees, scheduled payments and overdrafts.
 
@@ -53,5 +53,6 @@ Details, the Windows PowerShell form and troubleshooting are in docs/LEARNING_NO
 
 - [docs/LEARNING_NOTES.md](docs/LEARNING_NOTES.md): project layout, what Spring Boot auto-configures, how to run the app and tests.
 - [docs/architecture.md](docs/architecture.md): the data model diagram and why the ledger entries are the source of truth.
+- [docs/INTERVIEW_PREP.md](docs/INTERVIEW_PREP.md): concept explanations, trade-offs and likely interview questions, plus a walkthrough of the files that matter.
 - [docs/DECISIONS.md](docs/DECISIONS.md): every non-obvious decision with options, choice and trade-off.
 - [docs/CV_EVIDENCE.md](docs/CV_EVIDENCE.md): verified facts and test counts per phase, each backed by saved command output.

@@ -128,3 +128,67 @@ Trigger tests: `ImmutabilityTriggerIntegrationTest` has 9 tests. They cover UPDA
 ### Bugs caught
 
 None by the tests in this phase: all new tests passed the first time they ran. One compile error in the test code (an ambiguous `assertThat` on a `TransactionTemplate` result in `EntityMappingIntegrationTest`) was fixed before the commit; it was caught by the compiler, not by a test, and is not counted as a bug in the product code.
+
+## Phase 3: Accounts, deposits and transfers (brief phase 2)
+
+### Run details
+
+Date: 2026-09-29
+Commit tested: 0983815 (code and tests; the documentation files were edited but uncommitted when the tests ran, no source file differed from the commit).
+
+Commands run for this entry (Git Bash, Windows 11, `JAVA_HOME` set to the JDK 21 install and the Docker CLI on PATH):
+
+- `./gradlew cleanTest test --console=plain` (output saved to docs/evidence/phase-3-test-output.txt, exit code 0, BUILD SUCCESSFUL)
+- a script that read every `build/test-results/test/*.xml` file and summed the `tests`, `skipped`, `failures` and `errors` attributes per class, grouped by class-name suffix
+- two manual non-vacuity experiments on the atomicity test (described below), each followed by restoring the files and re-running the test to green
+
+### Test results
+
+Integration tests (*IntegrationTest): 106 run, 0 skipped, 0 failed, 0 errors
+Unit tests (*Test): 3 run, 0 skipped, 0 failed, 0 errors
+Total: 109 tests, 0 skipped, 0 failed, 0 errors
+
+Source: docs/evidence/phase-3-test-output.txt and build/test-results/test/*.xml after ./gradlew cleanTest test. The 74 Phase 1 and 2 tests are unchanged and still pass; Phase 3 added 35.
+
+Phase 3 test classes (tests from the XML):
+
+| Class | Tests | Category |
+|-------|-------|----------|
+| `MoneyMovementIntegrationTest` | 19 | integration (service level: deposits, transfers, every rejected input, posting guard, invariants over a mixed sequence) |
+| `LedgerApiIntegrationTest` | 13 | integration (MockMvc: status codes, problem+json shape, amount coercion) |
+| `AtomicityIntegrationTest` | 2 | integration (deposit and transfer crash after the flush) |
+| `DevStubUserSeederIntegrationTest` | 1 | integration |
+
+### Completed
+
+- ACCT-01 to ACCT-03: open, list only the caller's own, and view one account with its balance (`MoneyMovementIntegrationTest`, `LedgerApiIntegrationTest`). Another user's account and an unknown id are both 404.
+- ACCT-04: services take an `ActingUser` parameter and read no security context; the stub is `StubActingUser` (header `X-Acting-User-Id`, marked `TODO(Phase 6)`), and a users row comes from `DevStubUserSeeder` (dev profile) or test fixtures, not from a migration.
+- MONEY-01, MONEY-02: deposit (debit `EXTERNAL_FUNDING`, credit the customer) and transfer each write two entries that sum to zero, checked per transaction in SQL; cached balances equal the sum of entries.
+- MONEY-03: closed account and different-currency account are rejected with 422; a system account or unknown id as destination gives 404.
+- MONEY-04: amount 0, negative, above the configured maximum (`ledger.max-amount-minor`, default 100,000,000), `Long.MAX_VALUE`, `30.9`, `1e2`, `100.0`, the string `"3000"`, `null`, `true`, `9223372036854775808` and a missing amount all give 400 problem+json on both endpoints; identical from and to gives 400.
+- MONEY-05: insufficient funds gives 422 and writes nothing; the funds check runs after `AccountLockService.lock`, and the exact-balance transfer is allowed.
+- MONEY-06: one insert path (`LedgerPostingService.post`); `postingOutsideATransactionFailsLoudly` shows the MANDATORY guard.
+- MONEY-07: after every step of a 60-step seeded mixed sequence (including rejected overdrafts) every balance is at least 0 (`mixedSequenceKeepsEveryInvariant`).
+- MONEY-08: `AtomicityIntegrationTest` lets the real posting run, flushes, confirms the entries and new balance are visible inside the transaction, throws, and then finds no entries, no transaction row and unchanged balances from another connection.
+- MONEY-09: RFC 7807 `application/problem+json` for 400, 404, 422 and the generic 500; validation errors list field names and messages and never echo values.
+- `AccountLockService` is in its final call shape with an intentionally naive body (docs/DECISIONS.md, entry 18).
+
+### Non-vacuity of the atomicity test (manual, then reverted)
+
+- Experiment A: `@Transactional` removed from `TransferService.transfer` and `DepositService.deposit`, helpers left MANDATORY: both atomicity tests FAILED (`IllegalTransactionStateException`).
+- Experiment B: also changed the helpers from MANDATORY to plain `@Transactional`: both atomicity tests still FAILED (the deposit test saw the database balance stay 0 where 700 was expected; the transfer test was refused for insufficient funds because the earlier deposit's balance change had been lost).
+- All four service files were restored and the atomicity tests passed again afterwards. This check is not automated.
+
+### Not completed
+
+- The "global entry sum is zero" success criterion is asserted over the transactions created by each test's own user, not over the whole `ledger_entries` table: other test classes leave deliberately unbalanced rows in the shared database (docs/DECISIONS.md, entries 16 and 22). Whole-ledger reconciliation is Phase 4.
+- `AccountLockService.lock` takes no database lock yet, so concurrent requests on one account are not safe (Phase 4). No concurrency test exists.
+- No idempotency (Phase 5), no authentication (Phase 6); the acting user header is spoofable.
+- No audit log rows, no reversals, no history endpoint (out of the lean scope or later phases).
+- The app was not started with Docker Compose in this phase; the API was exercised through MockMvc and the service tests only.
+- Nothing has run on GitHub Actions (no remote repository exists).
+
+### Bugs caught
+
+- Found while writing `AtomicityIntegrationTest`: stubbing the injected `LedgerPostingService` field called the real method through the transactional proxy outside a transaction and failed on MANDATORY; the leftover Mockito matchers then made the next test fail misleadingly. Fixed by stubbing the spy behind the proxy (`AopTestUtils.getTargetObject`). This was a test-code error, not a product bug.
+- Nothing else failed on the first run of the new product code: the 33 other new tests passed the first time they ran.

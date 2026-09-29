@@ -185,3 +185,20 @@ Repositories extend `Repository<T, ID>`, the empty base interface, and declare o
 ## Why tests use unique data instead of cleaning up
 
 Deleting rows from the ledger is blocked by design, so tests cannot empty the tables. Each test makes its own user, account and transaction and only asserts on those (see docs/DECISIONS.md, entry 16). Two small traps: `Instant.now()` can have more precision than PostgreSQL stores (microseconds), so tests truncate with `truncatedTo(ChronoUnit.MICROS)` before comparing; and JSONB normalises key order and spacing, so JSON is compared as data, not as text.
+
+## Phase 3: the Spring pieces used for the first time
+
+- **Constructor injection.** A `@Service` class lists what it needs as constructor parameters; Spring creates each dependency once and passes it in. No `@Autowired` is needed on a single constructor, and there is no field injection, so a class shows its collaborators in one place.
+- **`@Transactional`.** Spring wraps the bean in a proxy; the proxy opens a transaction, calls your method and commits, or rolls back if an unchecked exception escapes. It only applies to calls that arrive from another bean (a method calling another method on `this` skips the proxy). `Propagation.MANDATORY` means "there must already be a transaction, otherwise throw". See docs/INTERVIEW_PREP.md, entry 3.
+- **`@RestController`, `@RequestBody`, `@Valid`.** The controller method receives the JSON body as a Java `record`; `@Valid` runs the Bean Validation annotations (`@NotNull`, `@Positive`, `@Size`, `@Pattern`) first, and a failure never reaches the method body.
+- **`@RestControllerAdvice` and `ProblemDetail`.** One class turns exceptions into `application/problem+json` responses (RFC 7807: `status`, `title`, `detail`, plus extra fields). It extends `ResponseEntityExceptionHandler` so Spring's own errors (unreadable JSON, missing header) use the same format.
+- **`@ConfigurationProperties`.** `LedgerProperties` is a record bound from the `ledger:` block of application.yml, so the maximum amount is a setting, not a constant in code. `@EnableConfigurationProperties` registers it as a bean.
+- **A `Clock` bean.** Services ask the clock for the time instead of calling `Instant.now()`, so a test could inject a fixed clock.
+- **Profiles.** `@Profile("dev")` on `DevStubUserSeeder` means it only exists when `SPRING_PROFILES_ACTIVE=dev`. To try the API by hand, run with that profile and send `X-Acting-User-Id: 00000000-0000-0000-0000-00000000d001`.
+- **MockMvc.** `@AutoConfigureMockMvc` gives a `MockMvc` that calls the controllers through Spring MVC without a network socket, using the real Jackson, validation and exception handler.
+- **`@MockitoSpyBean`.** Wraps a real bean in a Mockito spy so one call can be changed while the rest stays real. The injected field is the transactional proxy around the spy, so stubbing is done on `AopTestUtils.getTargetObject(bean)`; stubbing through the proxy calls the real method outside a transaction.
+
+### Two traps met while building it
+
+- **Jackson turns `30.9` into `30` by default** for a `Long` field, and accepts the string `"3000"`. `application.yml` sets `spring.jackson.deserialization.accept-float-as-int: false` and `spring.jackson.mapper.allow-coercion-of-scalars: false`, and `LedgerApiIntegrationTest` checks that each bad form gets a 400.
+- **A broken Mockito stub can make the next test fail misleadingly.** When the first stubbing attempt went through the transactional proxy it threw, and Mockito's half-finished argument matchers stayed on the thread; the following test failed with "entries missing". The cause was in the first test, not the second.

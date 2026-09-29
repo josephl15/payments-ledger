@@ -1,6 +1,6 @@
 # Decisions
 
-Every non-obvious decision is recorded here with the options considered, the choice and the trade-off. Later phases append new entries; an entry is not rewritten when a decision changes, a new entry supersedes it. Entries 1 to 11 are from Phase 1 (setup and toolchain), entries 12 onwards from Phase 2 (schema, triggers and domain model).
+Every non-obvious decision is recorded here with the options considered, the choice and the trade-off. Later phases append new entries; an entry is not rewritten when a decision changes, a new entry supersedes it. Entries 1 to 11 are from Phase 1 (setup and toolchain), entries 12 to 17 from Phase 2 (schema, triggers and domain model), entries 18 onwards from Phase 3 (accounts, deposits and transfers).
 
 ## 1. Stay on Spring Boot 3.5.16, which is past open-source end of life
 
@@ -322,3 +322,63 @@ A bug in the service could write an unbalanced transaction and the database woul
 
 **Revisit if**
 There is time for the stretch trigger.
+
+## 18. AccountLockService: final call shape, deliberately naive body until Phase 4
+
+**Phase:** 3 | **Date:** 2026-09-29 | **Status:** Accepted, body replaced in Phase 4
+
+**Context**
+Ordered row locking is the centre of the project and is built and proven in Phase 4 with a concurrency test. Phase 3 needs deposits and transfers to work now, and Phase 4's change should be one method body, not a refactor of every caller.
+
+**Options**
+- Build the locking now.
+- Leave locking out and let the services load accounts directly (Phase 4 then rewrites every service).
+- Create `AccountLockService.lock(Set<UUID>)` now in its final shape with a plain, non-locking read as its body.
+
+**Choice**
+The third. Every service already calls `lock` first, never loads an account before it, checks ownership with `existsByIdAndOwnerUserId` (no entity loaded) and works only with the accounts `lock` returns. The class comment says "intentionally naive until Phase 4". It returns CUSTOMER accounts only; a missing id or a system account id is a 404. Phase 4 replaces the body with `SELECT ... WHERE id IN (...) AND type = 'CUSTOMER' ORDER BY id FOR UPDATE`, and the concurrency test that is expected to fail today should then pass.
+
+**Trade-off**
+Until Phase 4 the service can lose updates under concurrent requests on the same account, and the docs say so. In exchange Phase 3 has no locking code to explain twice, and the red-then-green evidence pair is possible.
+
+## 19. One write path: LedgerPostingService creates entries and changes cached balances
+
+**Phase:** 3 | **Date:** 2026-09-29 | **Status:** Accepted
+
+**Context**
+Two invariants must hold in exactly one place to be believable: every transaction sums to zero, and a cached balance changes only together with its entries.
+
+**Choice**
+`LedgerPostingService.post` is the only code that inserts `ledger_transactions` and `ledger_entries` and the only code that calls `Account.applyDelta`. It rejects fewer than two lines, a zero line, a non-zero sum (added with `Math.addExact`), a customer line whose account was not passed in as locked, a currency mismatch, and any result that would leave a customer balance negative. System-account lines are skipped for the balance update (they have no cached balance). It is `Propagation.MANDATORY`. Balance changes go through the entity (`applyDelta`, written by Hibernate at flush) rather than an SQL increment, so that read-check-write really depends on the lock and the Phase 4 test can show a real race.
+
+**Trade-off**
+The posting service knows about accounts as well as entries. The alternative (each service updates balances itself) would spread the "balance moves with entries" rule over every operation, including the reversals to come.
+
+## 20. Status codes: what is a 404, a 400 and a 422
+
+**Phase:** 3 | **Date:** 2026-09-29 | **Status:** Accepted
+
+**Choice**
+400: the request is wrong by itself (missing, non-integer or non-positive amount, above the configured maximum, currency not GBP, from equals to, unreadable JSON, missing or malformed acting-user header). 404: the account does not exist, belongs to someone else (paying or deposit account), or is a system account; these are deliberately indistinguishable so the API does not reveal which ids exist. 422: the request is well formed but cannot be done: insufficient funds (checked only after the locks), or an account that is CLOSED or in a different currency. Unexpected errors are a generic 500 problem with no detail (the stack trace goes to the log only). The destination of a transfer may belong to anyone; only the paying account must be the caller's.
+
+**Trade-off**
+A caller cannot tell "no such account" from "not yours", which makes debugging slightly harder and enumeration harder. Closed and currency-mismatch use 422 rather than 409 because nothing conflicts with existing state; the operation is simply not allowed for that account.
+
+## 21. The acting user is a header stub with a dev-profile fixture
+
+**Phase:** 3 | **Date:** 2026-09-29 | **Status:** Accepted, removed in Phase 6
+
+**Choice**
+Controllers read `X-Acting-User-Id`, build an `ActingUser` record (marked `TODO(Phase 6)`) and pass it to the services; no service reads a security context. The user must already exist in `users`. A real users row is created by `DevStubUserSeeder`, active only in the `dev` profile, and by test fixtures; no migration inserts a user, so nothing seeded ever reaches a real database.
+
+**Trade-off**
+Anyone can claim to be anyone until Phase 6. That is stated in the README and the class comments, and nothing here should be exposed beyond localhost.
+
+## 22. Atomicity is proven by crashing after the flush, and the proof is itself checked
+
+**Phase:** 3 | **Date:** 2026-09-29 | **Status:** Accepted
+
+**Choice**
+`AtomicityIntegrationTest` spies on the posting service, lets the real post run, flushes, checks that the entries and the new balance are visible inside the transaction, then throws. Afterwards, from another connection, the entries, the transaction row and the balances must be as before. To confirm the test is not vacuous, `@Transactional` was removed from the service methods (both tests failed with IllegalTransactionStateException because the helpers are MANDATORY) and then MANDATORY was loosened on the helpers as well (both tests still failed, because the flow no longer ran as one unit). Both edits were reverted.
+
+**Scoping of the sum checks.** The shared test database also contains other test classes' deliberately corrupted and half-cleaned rows (entry 16), so "the ledger sums to zero" is asserted over the transactions created by the test's own user, not over the whole table. A whole-database check belongs to reconciliation in Phase 4.

@@ -1,6 +1,6 @@
 # Architecture
 
-This page describes the data model as built in Phase 2 (schema, triggers and domain model). Services, controllers and security come in later phases and are not described here.
+This page describes the data model (Phase 2) and how a money movement is written (Phase 3). Locking, idempotency and security come in later phases.
 
 ## Data model
 
@@ -73,3 +73,16 @@ The `balance_minor` column on a customer account is a cache of that sum, kept so
 | **Each transaction's entries sum to zero** | **Not the database.** Enforced by the posting service (Phase 3) and checked by reconciliation (Phase 4). A deferrable zero-sum constraint trigger is a stretch item that has not been built. |
 
 The honest limit of the triggers: the table owner or a superuser can disable them or drop the table. They stop application bugs and casual SQL, not a privileged database administrator. See docs/DECISIONS.md.
+
+## How a transfer is written (Phase 3)
+
+`POST /api/transfers` -> `TransferController` (validates the JSON, builds an `ActingUser`) -> `TransferService.transfer`, one `@Transactional` method:
+
+1. checks that need no database: amount in range, currency GBP, from is not to;
+2. ownership of the paying account, by a yes/no query that loads no entity;
+3. `AccountLockService.lock` returns the two CUSTOMER accounts (a plain read until Phase 4 turns it into `SELECT ... ORDER BY id FOR UPDATE`);
+4. checks on those accounts: both ACTIVE, currency matches, paying balance covers the amount (422 if not);
+5. `LedgerPostingService.post` inserts the `ledger_transactions` row and two entries (`-amount` and `+amount`, asserted to sum to zero), then applies both amounts to the cached balances through `Account.applyDelta`;
+6. commit: transaction, entries and balances become visible together, or (any exception) none of them do.
+
+A deposit is the same with `EXTERNAL_FUNDING` as the other side; that system account is never locked or updated. `ApiExceptionHandler` maps failures to RFC 7807 responses: 400 invalid request, 404 not found or not yours, 422 insufficient funds or unusable account.
