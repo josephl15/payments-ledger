@@ -1,6 +1,7 @@
 package dev.joseph.ledger.api;
 
 import dev.joseph.ledger.service.AccountNotUsableException;
+import dev.joseph.ledger.service.IdempotencyKeyMismatchException;
 import dev.joseph.ledger.service.InsufficientFundsException;
 import dev.joseph.ledger.service.InvalidRequestException;
 import dev.joseph.ledger.service.ResourceNotFoundException;
@@ -45,6 +46,12 @@ public class ApiExceptionHandler extends ResponseEntityExceptionHandler {
     @ExceptionHandler(AccountNotUsableException.class)
     ProblemDetail accountNotUsable(AccountNotUsableException ex) {
         return problem(HttpStatus.UNPROCESSABLE_ENTITY, "Account cannot be used", ex.getMessage());
+    }
+
+    /** The same Idempotency-Key was sent with a different request: 422, so the client knows it reused a key. */
+    @ExceptionHandler(IdempotencyKeyMismatchException.class)
+    ProblemDetail idempotencyKeyMismatch(IdempotencyKeyMismatchException ex) {
+        return problem(HttpStatus.UNPROCESSABLE_ENTITY, "Idempotency key reused", ex.getMessage());
     }
 
     @ExceptionHandler(InvalidRequestException.class)
