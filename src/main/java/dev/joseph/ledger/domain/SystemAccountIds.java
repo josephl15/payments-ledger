@@ -14,5 +14,10 @@ public final class SystemAccountIds {
     /** Reserved for withdrawals (a deferred requirement). Nothing posts to it yet. */
     public static final UUID EXTERNAL_PAYOUTS = UUID.fromString("00000000-0000-0000-0000-000000000002");
 
+    /** True for the seeded SYSTEM accounts, which have no cached balance and are never locked. */
+    public static boolean isSystem(UUID accountId) {
+        return EXTERNAL_FUNDING.equals(accountId) || EXTERNAL_PAYOUTS.equals(accountId);
+    }
+
     private SystemAccountIds() {}
 }

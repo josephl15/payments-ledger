@@ -23,6 +23,14 @@ spring:
   flyway:
     # Run the SQL files in classpath:db/migration at startup, before JPA starts.
     enabled: true
+  jackson:
+    deserialization:
+      # By default Jackson turns the JSON number 30.9 into the whole number 30 for a Long field. For money that would
+      # silently change the amount, so a decimal where an integer is expected is rejected (400).
+      accept-float-as-int: false
+    mapper:
+      # By default Jackson also accepts the STRING "3000" for a Long field. Turned off so amountMinor must be a JSON number.
+      allow-coercion-of-scalars: false
   mvc:
     # Framework errors (404, 405, bad JSON...) come back as RFC 7807 application/problem+json.
     problemdetails:
@@ -34,3 +42,7 @@ management:
       exposure:
         # Expose only /actuator/health; env, beans, etc. stay hidden.
         include: health
+
+ledger:
+  # Largest single deposit or transfer, in pence (100,000,000 = one million pounds). Bound to LedgerProperties.
+  max-amount-minor: 100000000
