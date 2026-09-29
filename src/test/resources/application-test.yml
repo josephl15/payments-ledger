@@ -2,7 +2,13 @@
 spring:
   datasource:
     hikari:
-      # Pool at least as large as the concurrency-test worker threads (Phase 4), so requests never queue for a connection while holding locks.
+      # Pool at least as large as the concurrency-test worker threads (Phases 4 and 5), so requests never queue for a connection while holding locks.
       maximum-pool-size: 20
       # A starved pool fails in 5 s instead of the 30 s default, so a pool bug shows up quickly.
       connection-timeout: 5000
+      # The suite keeps several Spring contexts alive at once (one per distinct test configuration) against one
+      # PostgreSQL container that allows 100 connections. By default every pool keeps its full 20 connections open
+      # even when idle, which used up all 100 once a fifth context existed. Keep 2 idle and let the extra connections
+      # that a concurrency test opened close after 10 seconds (10 s is Hikari's minimum idle timeout).
+      minimum-idle: 2
+      idle-timeout: 10000

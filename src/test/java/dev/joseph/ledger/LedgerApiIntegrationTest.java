@@ -68,8 +68,13 @@ class LedgerApiIntegrationTest extends AbstractPostgresIntegrationTest {
         return UUID.fromString(json.readTree(body).get("id").asText());
     }
 
+    /** Deposits and transfers require an Idempotency-Key (Phase 5); a fresh one per call, so calls never replay each other. */
     private ResultActions postJson(String path, UUID user, String body) throws Exception {
-        return send(post(path).header(ACTING_USER, user).contentType(MediaType.APPLICATION_JSON).content(body));
+        return send(post(path)
+                .header(ACTING_USER, user)
+                .header("Idempotency-Key", UUID.randomUUID().toString())
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(body));
     }
 
     private void deposit(UUID user, UUID account, long amount) throws Exception {
