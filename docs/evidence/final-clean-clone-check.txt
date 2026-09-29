@@ -1,0 +1,45 @@
+Clean-clone check, 2026-09-29. Git Bash on Windows 11, JDK 21.0.12 (JAVA_HOME exported), Docker Desktop (Engine 29.8.1).
+Method: git clone of the local repository into a scratch directory (local path clone, nothing pushed), then the documented commands run from that clone with a throwaway LEDGER_JWT_SECRET exported. The clone and the Compose stack were deleted afterwards (docker compose down -v).
+
+== Attempt 1, clone at 0d7510a: ./gradlew build with LEDGER_JWT_SECRET exported
+Result: BUILD FAILED. 187 of 188 tests passed. JwtSecretFailFastTest > aMissingSecretStopsTheContextFromStarting() FAILED (JwtSecretFailFastTest.java:38).
+Cause: the test expects the secret to be absent, but the exported environment variable supplied it. Test-only problem, fixed in commit 340010e.
+
+== Attempt 2, clone at 340010e: ./gradlew build with LEDGER_JWT_SECRET exported
+420:BUILD SUCCESSFUL in 58s
+Tests counted from the clone's build/test-results/test/*.xml: integration 171 run, 1 skipped, 0 failed, 0 errors; unit 17 run, 0 skipped, 0 failed, 0 errors; total 188.
+build/libs contains app.jar (the file the Dockerfile copies).
+
+== docker compose config without LEDGER_JWT_SECRET
+error while interpolating services.app.environment.LEDGER_JWT_SECRET: required variable LEDGER_JWT_SECRET is missing a value: Set LEDGER_JWT_SECRET (32+ characters, see .env.example)
+
+== docker compose up --build -d --wait (exit 0): both containers healthy; GET /actuator/health -> {"status":"UP"}; unauthenticated GET /api/accounts -> 401
+
+== API walkthrough against the Compose stack (script output, docs/evidence version; ids differ per run)
+-- register + login
+{"id":"95229b8a-0228-46df-a652-2ee35d072812","username":"alice","role":"USER"}
+token length: 191
+-- open two accounts
+{"id":"62f19561-4800-4c98-b2dd-cc26d3d2cf9b","name":"Current","currency":"GBP","status":"ACTIVE","balanceMinor":0,"createdAt":"2026-09-29T22:20:03.303837858Z"}
+{"id":"0bd6c2c4-7e64-4db9-aec7-4f185f738a53","name":"Savings","currency":"GBP","status":"ACTIVE","balanceMinor":0,"createdAt":"2026-09-29T22:20:03.570484482Z"}
+-- deposit 10000 pence into Current
+HTTP/1.1 201 
+{"id":"1dd502e4-868c-4e18-9904-f91e0214e8ea","type":"DEPOSIT","reference":null,"createdAt":"2026-09-29T22:20:04.007682453Z","entries":[{"accountId":"00000000-0000-0000-0000-000000000001","amountMinor":-10000,"currency":"GBP"},{"accountId":"62f19561-4800-4c98-b2dd-cc26d3d2cf9b","amountMinor":10000,"currency":"GBP"}]}
+
+-- transfer 2500 Current -> Savings
+HTTP/1.1 201 
+{"id":"994e5a48-85fd-4bfe-8b37-42736128c059","type":"TRANSFER","reference":null,"createdAt":"2026-09-29T22:20:04.283869317Z","entries":[{"accountId":"62f19561-4800-4c98-b2dd-cc26d3d2cf9b","amountMinor":-2500,"currency":"GBP"},{"accountId":"0bd6c2c4-7e64-4db9-aec7-4f185f738a53","amountMinor":2500,"currency":"GBP"}]}
+
+-- same request again with the same key (retry)
+HTTP/1.1 201 
+Idempotent-Replayed: true
+{"id": "994e5a48-85fd-4bfe-8b37-42736128c059", "type": "TRANSFER", "entries": [{"currency": "GBP", "accountId": "62f19561-4800-4c98-b2dd-cc26d3d2cf9b", "amountMinor": -2500}, {"currency": "GBP", "accountId": "0bd6c2c4-7e64-4db9-aec7-4f185f738a53", "amountMinor": 2500}], "createdAt": "2026-09-29T22:20:04.283869317Z", "reference": null}
+
+-- balances
+{"id":"62f19561-4800-4c98-b2dd-cc26d3d2cf9b","name":"Current","currency":"GBP","status":"ACTIVE","balanceMinor":7500,"createdAt":"2026-09-29T22:20:03.303838Z"}
+{"id":"0bd6c2c4-7e64-4db9-aec7-4f185f738a53","name":"Savings","currency":"GBP","status":"ACTIVE","balanceMinor":2500,"createdAt":"2026-09-29T22:20:03.570484Z"}
+-- overdraft attempt
+HTTP/1.1 422 
+{"type":"about:blank","title":"Insufficient funds","status":422,"detail":"Insufficient funds","instance":"/api/transfers"}
+
+== docker compose down -v: containers, volume and network removed; no clone containers left.
