@@ -1,0 +1,28 @@
+Five consecutive runs of ConcurrentIdempotencyIntegrationTest (6 tests each: 20 identical transfers, 20 identical deposits, control with 20 keys, 20 different bodies on one key, 20 failing identical requests, and the held-open-first-transaction test), each preceded by cleanTest. Git commit under test: 90db979
+=== run 1 ===
+gradle exit=0
+    CONCURRENT TRANSFER (requests=20, threads=20): statuses=[201], executed=1, replayed=19, ledgerTransactions=1
+xml: tests=6 skipped=0 failures=0 errors=0
+=== run 2 ===
+gradle exit=0
+    CONCURRENT TRANSFER (requests=20, threads=20): statuses=[201], executed=1, replayed=19, ledgerTransactions=1
+xml: tests=6 skipped=0 failures=0 errors=0
+=== run 3 ===
+gradle exit=0
+    CONCURRENT TRANSFER (requests=20, threads=20): statuses=[201], executed=1, replayed=19, ledgerTransactions=1
+xml: tests=6 skipped=0 failures=0 errors=0
+=== run 4 ===
+gradle exit=0
+    CONCURRENT TRANSFER (requests=20, threads=20): statuses=[201], executed=1, replayed=19, ledgerTransactions=1
+xml: tests=6 skipped=0 failures=0 errors=0
+=== run 5 ===
+gradle exit=0
+    CONCURRENT TRANSFER (requests=20, threads=20): statuses=[201], executed=1, replayed=19, ledgerTransactions=1
+xml: tests=6 skipped=0 failures=0 errors=0
+
+Mutation check (run once by hand, then reverted; not committed): IdempotencyService.begin was changed to insert the key row under a
+random key ("idemKey + -MUTANT- + UUID"), which removes the unique-constraint collision. ConcurrentIdempotencyIntegrationTest then FAILED
+on 3 of its 5 tests. Printed line for the 20 identical transfers:
+    CONCURRENT TRANSFER (requests=20, threads=20): statuses=[201], executed=20, replayed=0, ledgerTransactions=20
+with the payer balance 8000 where 9900 was expected (20 debits of 100 instead of 1), and 20 transactions where 1 was expected.
+The mutation was then reverted (grep for MUTANT in the source: 0 matches) and the tests passed again.

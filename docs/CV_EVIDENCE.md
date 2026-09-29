@@ -264,3 +264,69 @@ Source: docs/evidence/phase-4-test-output.txt and build/test-results/test/*.xml.
 ### Bugs caught
 
 - None in the shipped code: every new test passed the first time it ran against the fixed code. One test-design problem was found by measuring: the first deadlock mutation test was too large (49 seconds, dominated by PostgreSQL's 1 second deadlock detection) and was cut to 40 transfers.
+
+## Phase 5: Idempotency
+
+### Run details
+
+Date: 2026-09-29
+Commits (in order): `52397ad` idempotency implementation (executor, service, hasher, controllers, TTL setting); `6278ade` idempotency tests plus the test-profile pool setting; `90db979` deterministic held-open-transaction test. The repeat runs and the full suite below ran on the clean tree at `90db979` (only documentation and evidence files were added afterwards).
+
+Commands run for this entry (Git Bash, Windows 11, `JAVA_HOME` set to the JDK 21 install, Docker CLI on PATH, real PostgreSQL 16.15 through Testcontainers):
+
+- `./gradlew cleanTest test --tests '*Idempotency*' ...` during development, then the full suite twice while building (the first full run failed, see Bugs caught)
+- one hand-made mutation run (source edited, run, reverted; docs/evidence/phase-5-repeat-runs.txt)
+- five consecutive `./gradlew cleanTest test --tests '*ConcurrentIdempotencyIntegrationTest'` runs (docs/evidence/phase-5-repeat-runs.txt)
+- `./gradlew cleanTest test --console=plain` for the full suite (docs/evidence/phase-5-test-output.txt), plus a script summing `tests`, `skipped`, `failures` and `errors` from every `build/test-results/test/*.xml`
+
+### Concurrent-duplicate parameters
+
+- Main scenario: 20 identical `POST /api/transfers` requests (100 pence from an account funded with 10,000 pence, same user, same `Idempotency-Key`, same body) sent through MockMvc (controllers, validation, executor, real database) from 20 threads released together by a start latch; Hikari pool 20 in the test profile; each result read with a 30 second timeout; `@Timeout(120)`; test class not `@Transactional`.
+- Result in each of five consecutive runs (printed by the test): all 20 responses 201, 1 request executed the work and 19 were replayed (`Idempotent-Replayed: true`), 1 ledger transaction, 1 key row, payer balance 9,900, payee balance 100, every response body equal as JSON, reconciliation over the user's accounts and transactions clean. The scenario takes about 0.1 second, so overlap alone was not assumed: `aDuplicateArrivingWhileTheFirstTransactionIsOpenWaitsThenReplaysItsResult` holds the first transaction open and reads `pg_stat_activity` to see the duplicate's INSERT waiting on a transaction id before letting the first commit.
+- Other scenarios in the same class: 20 identical deposits (5,000 pence) give one transaction and a balance of 5,000; a control with 20 different keys executes all 20 (payer 8,000, payee 2,000); one key with 20 different bodies gives exactly one 201 and nineteen 422 with one transaction; 20 identical transfers that fail for insufficient funds all return 422, create no transaction and leave no key row.
+- Mutation check: with `begin` changed to insert under a random key (so no unique collision is possible), the class failed 3 of 5 tests at the time; the 20 identical transfers ran as 20 executions and 20 ledger transactions, and the payer balance was 8,000 instead of 9,900. Reverted; not committed.
+
+### Repeat runs
+
+Five consecutive runs of `ConcurrentIdempotencyIntegrationTest` (6 tests), each preceded by `cleanTest`: 5 of 5 passed, each run 6 tests, 0 skipped, 0 failures, 0 errors. Interleavings differ from run to run, so this is repeated evidence, not a proof.
+
+### Test results (full suite, `cleanTest test`, exit code 0)
+
+Integration tests (*IntegrationTest): 151 run, 1 skipped, 0 failed, 0 errors
+Unit tests (*Test): 11 run, 0 skipped, 0 failed, 0 errors
+Total: 162 tests, 1 skipped (`LockingOffDemoIntegrationTest`, `@Disabled` on purpose), 0 failed, 0 errors
+
+Source: docs/evidence/phase-5-test-output.txt and build/test-results/test/*.xml. The 125 Phase 1 to 4 tests are unchanged in number and still pass (`LedgerApiIntegrationTest` now sends a fresh key on every post); Phase 5 added 37 (29 integration, 8 unit).
+
+| Class | Tests | What it proves |
+|-------|-------|----------------|
+| `IdempotencyApiIntegrationTest` | 12 | a retry of a deposit or transfer executes once and replays the stored status and body; reordered JSON is the same request; the key row holds a 64-character hash, status, body, transaction id and a 24 hour expiry; same key with another body or on another endpoint is 422; different users may share key text; a failed first attempt (insufficient funds, unknown account) leaves no key row and a retry re-executes; missing, blank, over-long and bad-character keys are 400 while a 128-character key is accepted |
+| `IdempotencyExpiryIntegrationTest` | 3 | with a movable clock: replay at 23 hours, reuse and re-execution after 24h01, reuse with a different body after 25 hours |
+| `IdempotencyServiceIntegrationTest` | 8 | second `begin` raises the duplicate exception from the `begin` call; only `uq_idempotency_user_key` counts (a duplicate username and a missing user do not); `begin` and `complete` need a transaction; `replay` returns the stored response, refuses a wrong hash and treats an expired row as absent; the executor refuses to run inside a transaction |
+| `ConcurrentIdempotencyIntegrationTest` | 6 | the concurrent scenarios above plus the held-open-transaction test |
+| `RequestHasherTest` (unit) | 8 | canonical text is `METHOD`, path and sorted JSON; hash is 64 lowercase hex; field order and whitespace do not matter; absent and null optional fields are equal; amount, account, reference, method and path each change the hash; header rules |
+
+### Completed
+
+- IDEM-01: `Idempotency-Key` required on deposits and transfers; 400 problem+json when missing, blank, over 128 characters or outside `A-Za-z0-9_.:-`.
+- IDEM-02: key row inserted first with `saveAndFlush` in the business transaction; the unique constraint gives the guarantee; no pre-SELECT.
+- IDEM-03, IDEM-04: retry returns the stored status and body and creates one transaction; same key with a different request is 422.
+- IDEM-05: 20 concurrent identical requests create exactly one transaction; reconciliation clean afterwards.
+- IDEM-06: stored response read in a new read-only transaction after the rollback; the rollback-only pitfall is in docs/LEARNING_NOTES.md.
+- IDEM-07: configurable TTL (`ledger.idempotency-ttl`, default 24h), expired keys reclaimed by delete-then-insert, tested with a controllable clock; rule in docs/DECISIONS.md, entry 28.
+- IDEM-08: hash covers method, concrete path and the canonical validated DTO. Reversals do not exist yet (out of the lean scope), so the different-reversals case is covered only in the hasher unit test with different paths.
+
+### Not completed
+
+- Reversals are not built, so idempotency is on deposits and transfers only.
+- No cleanup job for expired keys; expired rows remain until their key is reused.
+- Replayed bodies equal the first response as JSON data, not byte for byte (JSONB storage).
+- Tested against one application instance and one database; not measured for latency or throughput. The concurrent tests call the controllers through MockMvc, not over real HTTP sockets.
+- The 5 second `lock_timeout` bounds how long a duplicate can wait; a duplicate waiting longer than that would fail instead of replaying. Not tested.
+- Nothing has run on GitHub Actions (no remote repository exists).
+
+### Bugs caught
+
+- No bug in the idempotency code: the new tests passed the first time they ran.
+- Test infrastructure: the first full-suite run failed 13 `LedgerApiIntegrationTest` tests because their Spring context could not open a database connection at startup after the idempotency tests added another cached context (diagnosed as connection slot exhaustion on the 100-connection container; the error text was not captured). Fixed in `6278ade` with `minimum-idle: 2` and `idle-timeout: 10000` in the test profile; the next full run passed.
+- The mutation check above is evidence that the concurrency test can fail.

@@ -1,6 +1,6 @@
 # Decisions
 
-Every non-obvious decision is recorded here with the options considered, the choice and the trade-off. Later phases append new entries; an entry is not rewritten when a decision changes, a new entry supersedes it. Entries 1 to 11 are from Phase 1 (setup and toolchain), entries 12 to 17 from Phase 2 (schema, triggers and domain model), entries 18 to 22 from Phase 3 (accounts, deposits and transfers), entries 23 to 26 from Phase 4 (locking, reconciliation and the concurrency tests).
+Every non-obvious decision is recorded here with the options considered, the choice and the trade-off. Later phases append new entries; an entry is not rewritten when a decision changes, a new entry supersedes it. Entries 1 to 11 are from Phase 1 (setup and toolchain), entries 12 to 17 from Phase 2 (schema, triggers and domain model), entries 18 to 22 from Phase 3 (accounts, deposits and transfers), entries 23 to 26 from Phase 4 (locking, reconciliation and the concurrency tests), entries 27 and 28 from Phase 5 (idempotency).
 
 ## 1. Stay on Spring Boot 3.5.16, which is past open-source end of life
 
@@ -437,3 +437,38 @@ Process: the showcase test was committed and run against the naive lock body fir
 
 **Trade-off**
 The concurrency tests take a few seconds (the deadlock mutation test about 15 s, because PostgreSQL waits `deadlock_timeout`, 1 s by default, before resolving each deadlock). Thread interleaving is not reproducible, so a passing run is evidence rather than proof; the tests are repeated (docs/CV_EVIDENCE.md gives the count) and the mechanism is separately proven by the lock-service tests (a NOWAIT probe from a second session sees the row locked).
+
+## 27. Idempotency is a unique-constraint guarantee in a non-transactional executor, not a pre-check and not ON CONFLICT
+
+**Phase:** 5 | **Date:** 2026-09-29 | **Status:** Accepted
+
+**Context**
+A retried or duplicated deposit or transfer must move money once. Duplicates can arrive at the same instant, so whatever detects them must be race-free.
+
+**Options**
+- Check then insert: SELECT the key, and insert it if absent. Two requests can both see "absent" (a race), so it is not a guarantee.
+- `INSERT ... ON CONFLICT DO NOTHING` and look at the row count: race-free, no exception, so the transaction stays usable and the stored response can be read in it.
+- Insert the key row first and let the unique constraint `uq_idempotency_user_key` reject the second one: race-free; the second insert waits for the first transaction to finish, then fails.
+
+**Choice**
+The third. `IdempotencyService.begin` inserts `(user_id, idem_key, request_hash)` first, inside the business transaction, with `saveAndFlush` and a database-generated id (so no pre-SELECT is issued and the violation is raised at that line). `IdempotentExecutor`, which is not `@Transactional`, wraps the unchanged deposit and transfer services in a `TransactionTemplate`: begin, work (the service joins the transaction), complete, commit. On a duplicate the template has already rolled back and ended; only then does the `catch` call `replay`, a read-only transaction that returns the stored status and JSON, or 422 if the request hash differs. The duplicate is recognised only when the SQLSTATE is 23505 AND the constraint name is `uq_idempotency_user_key` (Hibernate's `ConstraintViolationException` carries both); any other error is rethrown. The executor refuses to run inside an open transaction, and there is no `REQUIRES_NEW`. Alternatives to putting the logic in the services (threading a key through both business methods) were rejected because it would change Phase 3 code and mix two concerns.
+
+**Trade-off**
+A duplicate holds a database connection while it waits for the first transaction, so the pool must cover the number of simultaneous duplicates (the tests use a pool of 20 for 20 threads), and the 5 second `lock_timeout` bounds the wait. `ON CONFLICT DO NOTHING` would avoid the aborted transaction; the exception path was chosen because it is the well-known pitfall (docs/LEARNING_NOTES.md) and forces the design to be explicit about transaction boundaries. Endpoints must remember to call the executor.
+
+**Revisit if**
+Waiting duplicates hurt (return 409 "in progress" instead), or many more money endpoints appear (move the executor call into a filter or annotation).
+
+## 28. Failed attempts are not stored; the request hash covers method, path and validated DTO; expired keys are reclaimed by delete-then-insert
+
+**Phase:** 5 | **Date:** 2026-09-29 | **Status:** Accepted
+
+**Choice**
+- *Failures are not replayed.* The key row lives in the business transaction, so a failed attempt (insufficient funds, unknown account, any exception) rolls the row back and a retry with the same key runs again. Simple and crash-safe; it means a client can get a different answer on retry (the account may have been topped up). Recorded rather than hidden.
+- *Fingerprint.* `request_hash` is SHA-256 of `METHOD \n concrete path \n JSON of the validated request DTO with alphabetically sorted properties`, computed with a private Jackson mapper so application-wide JSON settings cannot change stored hashes. It is computed from the DTO, so field order and whitespace in the incoming JSON do not matter, and an absent optional field equals an explicit null. The concrete path (the URL actually called) is included so a future `/transactions/{id}/reversal` with two different ids under one key cannot replay each other. Same key, different fingerprint: 422.
+- *Key format.* 1 to 128 characters from letters, digits and `_ . : -`; anything else, or no header, is a 400. The character set keeps odd characters out of logs and keys.
+- *Expiry.* `ledger.idempotency-ttl` (default 24h, a `Duration`), `expires_at` set from the injected `Clock`. An expired row still occupies the unique index, so `begin` first deletes an expired row for that (user, key) in the same transaction and then inserts. If two requests do this together, the second delete finds nothing and the unique constraint still selects one winner. `replay` treats an expired or vanished row as absent and the executor tries again (at most three times). Tested with a movable test clock at 23 hours (replayed), 24h01 and 25 hours (reused, including with a different body).
+- *Stored response.* A JSONB column written from the JSON text the response was built from. JSONB reorders keys and adds spaces, so a replay is equal to the first response as JSON data, not byte for byte (tests compare parsed JSON; two replays are textually identical because both are read from the same column).
+
+**Trade-off**
+No cleanup job, so expired rows stay until their key is reused (a scheduled delete is a small later addition). A 24 hour window means a retry after a longer outage is treated as new. Hashing the DTO means two bodies the server treats identically (for example a null and an omitted `reference`) are the same request, which is the intent.

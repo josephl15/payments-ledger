@@ -191,3 +191,102 @@ The story to tell: the showcase was written first and committed failing against 
 ## A concurrency test that cannot fail (what was avoided)
 
 A concurrent test can pass for the wrong reason: a thread pool that never overlaps the work, `Future`s whose exceptions are never read, a run in which every request was rejected, or a pool of database connections smaller than the thread count so requests queue outside the database. This project's tests use a start gate, read every result with a timeout, assert that some transfers succeeded and some were refused, size the connection pool above the thread count, use a seeded Random for the inputs, and were each made to fail on purpose (the naive lock for the showcase, the alternating-order lock for the deadlock test). If asked "how do you know the test is meaningful", the answer is the recorded red run.
+
+---
+
+## Walkthrough: the four files that matter for idempotency (Phase 5)
+
+1. `src/main/java/dev/joseph/ledger/service/IdempotentExecutor.java`: the whole protocol in one method. It is deliberately not `@Transactional`; it opens the transaction itself with a `TransactionTemplate`: claim the key, run the business call, store the response, commit. If claiming the key hits the unique constraint, the template has already rolled back and finished, and only then does the `catch` read the stored answer in a new transaction. `DepositService` and `TransferService` were not changed at all; they simply join the executor's transaction.
+2. `src/main/java/dev/joseph/ledger/service/IdempotencyService.java`: the three database steps. `begin` deletes an expired row for this user and key, inserts the new row and flushes, and turns a violation of the constraint `uq_idempotency_user_key` (SQLSTATE 23505 plus that exact name) into `DuplicateIdempotencyKeyException`. `complete` writes the response onto the row. `replay` reads it back.
+3. `src/main/java/dev/joseph/ledger/service/RequestHasher.java`: the request fingerprint, SHA-256 of `METHOD \n concrete path \n JSON of the validated request with sorted property names`. Same request in any JSON field order gives the same hash; a different amount, account, path or method gives a different one. `RequestHasherTest` shows each case.
+4. `src/test/java/dev/joseph/ledger/ConcurrentIdempotencyIntegrationTest.java`: 20 identical requests on 20 threads create one ledger transaction, with a control (20 different keys create 20), a case that holds the first transaction open and looks in `pg_stat_activity` to see the duplicate genuinely waiting, and reconciliation at the end. The controller side is only a lambda in `DepositController` / `TransferController` that says "this is the work to make safe".
+
+The story to tell: idempotency is a decorator around the business transaction, so the money code has no idea it exists. The guarantee comes from a unique index, not from Java code. The test was checked by breaking it on purpose (the key made unique per request): 20 transfers then executed instead of 1. Numbers are in `docs/CV_EVIDENCE.md`.
+
+## 13. What idempotency is and why payments need it
+
+**Plain words.** An operation is idempotent if doing it twice has the same effect as doing it once. On the network a client often cannot tell whether a request failed: the connection may drop after the server has committed the transfer but before the reply arrives. The only safe reaction for the client is to send it again, and without protection that moves the money twice. The client therefore puts a unique `Idempotency-Key` on each payment request; the server remembers the key and, if it sees it again, returns the first answer instead of doing the work again.
+
+**Why here.** Deposits and transfers require the header (missing, blank, longer than 128 characters or characters outside letters, digits and `_ . : -` give a 400). A key belongs to one user, so two users may use the same key text.
+
+**Trade-off.** Clients must generate and keep keys, and the server must store one row per payment. Reads and other methods (GET) are naturally idempotent and need none.
+
+**Likely questions**
+- *Difference between idempotent and safe methods?* Safe means no side effects (GET). Idempotent means repeating has no extra effect (PUT, DELETE). POST is neither by default, which is why payments add a key.
+- *Who generates the key?* The client, once per intended payment (a UUID is fine), and reuses it for retries of that same payment only.
+- *What if the client reuses a key for a different payment?* The server notices the request differs and answers 422 rather than silently returning the wrong payment's result.
+
+## 14. Why a unique constraint and not "check then insert"
+
+**Plain words.** The tempting code is: look up the key; if it is not there, do the work and save the key. Two requests arriving together can both look, both see nothing, and both do the work. The check and the insert are two steps, and anything can happen between them. A unique index makes the database do it as one step: the INSERT either succeeds or it does not, and the database serialises the competing inserts for us.
+
+**Why here.** `begin` inserts the key row first, inside the business transaction, and flushes so that a violation is raised at that exact line, not later at commit. The key id is generated by the database (an identity column), so Spring Data does a plain INSERT and not the "SELECT to see if it exists, then INSERT" it would do for an entity whose id you assigned yourself. The concurrent test proves it and a mutation proves the test: with the row inserted under a random key (no collision possible) 20 identical transfers all executed and the payer lost 2,000 pence instead of 100.
+
+**Trade-off.** The duplicate's INSERT waits inside PostgreSQL until the first transaction finishes, holding a database connection, so many duplicates need a connection pool at least as big as the number of simultaneous requests. The alternative `INSERT ... ON CONFLICT DO NOTHING` also waits, but does not raise an error, so the transaction stays usable; it was not chosen because the exception path shows the rollback-only problem this project wants to understand (docs/DECISIONS.md, entry 27).
+
+**Likely questions**
+- *Why not `synchronized` or a lock in Java?* It only works inside one server process. With two application instances only the database is shared.
+- *Why not SELECT ... FOR UPDATE on the key?* There is no row to lock the first time; the unique index is exactly what arbitrates rows that do not exist yet.
+- *What is a race condition here?* Two requests interleave so that a check they both passed is no longer true by the time they act.
+
+## 15. What happens when two identical requests arrive at the same instant
+
+**Plain words.** Both start a transaction and try to insert the same (user, key) row. PostgreSQL lets one insert proceed and makes the other wait, because it cannot yet know whether the first will commit. The winner does the transfer, stores its response on the key row and commits. The waiting insert now fails with the unique-violation error. The loser rolls back, then reads the winner's stored response in a new transaction and returns it. Both callers get the same answer and there is one ledger transaction.
+
+**Proof.** `aDuplicateArrivingWhileTheFirstTransactionIsOpenWaitsThenReplaysItsResult` holds the first transaction open and asks PostgreSQL (`pg_stat_activity`) whether the duplicate's INSERT is waiting on a transaction id, then lets the first commit and checks the duplicate got the same body. The 20-thread tests then check the count of ledger transactions, key rows and balances, and that reconciliation is clean.
+
+**Trade-off.** If the winner takes longer than the 5 second `lock_timeout` set on every connection (a very slow transfer, or a queue of other transfers on the same accounts), the waiting duplicate would fail with a lock timeout instead of replaying. Acceptable here; the client retries.
+
+**Likely questions**
+- *What if the first request crashes half way?* Its transaction rolls back, key row included, and the waiting duplicate's insert then succeeds and it does the work itself.
+- *What if the server dies after commit but before replying?* The client retries and gets the stored response; that is the whole point.
+- *How do you test something that depends on timing?* Release all threads from a latch together, read every result, and add one deterministic test that holds the winner open so the overlap is certain, not hoped for.
+
+## 16. Why the replay happens after the rollback, in a new transaction
+
+**Plain words.** Once a SQL statement fails in PostgreSQL, the whole transaction is "aborted": every later statement, even a plain SELECT, is refused until it ends. Spring also marks a transaction rollback-only when a transactional method throws, and even if you catch that exception and carry on, the eventual commit throws `UnexpectedRollbackException`. So you cannot catch the duplicate-key error and then read the stored response in the same transaction. The read has to happen after the transaction has ended.
+
+**Why here.** `IdempotentExecutor` is not `@Transactional`. If it were, its own `catch` block would still be running inside the doomed transaction. Instead it uses a `TransactionTemplate`: the template rolls back and finishes, the exception reaches the `catch` with no transaction open, and `IdempotencyService.replay` runs in its own short read-only transaction. The executor refuses to run inside an existing transaction (`theExecutorRefusesToRunInsideAnotherTransaction`) so nobody can break this by accident. `spring.jpa.open-in-view` is false, so the read cannot be served from a session that still remembers the rolled-back attempt. There is no `REQUIRES_NEW`: a nested new transaction needs a second connection while the first is still held, which can exhaust the pool under load.
+
+**Trade-off.** The idempotency logic is a wrapper the controllers must call, not something hidden in the services, so a new money endpoint that forgets to use the executor would not be idempotent. That is visible in the controller and easy to review.
+
+**Likely questions**
+- *What is rollback-only?* A flag on the transaction: something inside it failed, so the only allowed outcome is rollback. It is set when a `@Transactional` method throws a runtime exception, even if a caller catches it.
+- *What does `Propagation.REQUIRES_NEW` do and why avoid it here?* It suspends the current transaction and starts another on a second connection; while the first stays open the pool can run dry.
+- *Why is only a specific constraint treated as a duplicate?* Other unique or foreign key violations are real bugs or different rules (for example one reversal per transaction, later); treating every 23505 as "seen before" would hide them. `begin` checks the SQLSTATE and the constraint name `uq_idempotency_user_key`, and tests show a duplicate username and a missing user are not mistaken for it.
+
+## 17. Failed requests are not replayed
+
+**Plain words.** If the first attempt fails (for example insufficient funds), everything rolls back, and that includes the key row, so nothing is remembered. A retry with the same key runs the request again. Only a request that succeeded is stored.
+
+**Why here.** It falls out of the design: the key row is in the same transaction as the money, so "key stored" and "money moved" cannot disagree. The test `aFailedFirstAttemptIsNotRememberedSoARetryRunsAgain` fails a transfer for lack of funds, tops up the account, and retries with the same key: it succeeds and moves money once. Under concurrency, 20 identical requests that all fail each fail cleanly with 422 and leave no key row.
+
+**Trade-off.** A client never receives a "stored no". A retry costs the server the work again, and the answer can legitimately change (the account was topped up in between). Some payment APIs store failures too and make the opposite trade: repeatable answers, but a client that wants to retry after fixing the cause must use a new key. The other approach (a separate "processing" row committed first) is riskier: a crash leaves a stuck key.
+
+**Likely questions**
+- *Should a 500 be stored?* Not here; nothing was committed, so retrying is safe.
+- *Should a validation error (400) use a key?* No: it is rejected before the executor and stores nothing.
+
+## 18. Expiry and the request fingerprint
+
+**Plain words.** Keys cannot be kept for ever, so each row has an `expires_at` (default 24 hours, setting `ledger.idempotency-ttl`). Once expired, the same key may be used again as a new request. There is a catch: an expired row still sits in the unique index, so a new INSERT with that key would collide with it for ever. `begin` therefore deletes an expired row for that (user, key) in the same transaction, then inserts. Two requests doing this at once are safe: the second delete finds nothing and the unique index still picks one winner. Time comes from an injected `Clock`, and `IdempotencyExpiryIntegrationTest` moves a test clock by 23, 24h01 and 25 hours instead of waiting.
+
+**The fingerprint.** The key alone does not say whether a retry is the same request. The stored `request_hash` is SHA-256 of the HTTP method, the concrete path and the validated request object written as JSON with sorted property names. Hashing the object rather than the raw text means field order and whitespace do not matter; including the method and the actual path means the same key used on `/api/deposits` and `/api/transfers` never replays the other's result (422). This matters even more for reversals later (`/api/transactions/{id}/reversal`): the id has to be part of the hash.
+
+**Trade-off.** A short TTL is cheap but a client retrying after a long outage may double-pay; a long TTL keeps more rows. There is no cleanup job, so expired rows stay until the key is reused.
+
+**Likely questions**
+- *How long should keys live?* Longer than the longest time a client could plausibly retry; 24 hours is a common default.
+- *Why SHA-256 and not just compare the body?* A fixed 64-character value is easy to store and compare; it is a fingerprint, not a secret.
+- *What if someone changes the request format later?* Old hashes no longer match new-format retries; acceptable for a 24 hour window.
+
+## 19. What I would change for production
+
+- Store the response body as plain text if byte-identical replay matters. It is JSONB here, which reorders keys and changes spacing, so tests compare replayed and fresh responses as JSON data (two replays are textually identical to each other).
+- Add a scheduled job to delete expired keys, and monitoring of how often replays and 422s happen.
+- Return 409 with "in progress" for a duplicate that would have to wait a long time, instead of blocking a connection; or use `ON CONFLICT DO NOTHING` to keep the transaction usable.
+- Scope keys per endpoint or tenant if several services share the table; add rate limiting so nobody can fill the table with keys.
+- Move the executor call into a shared web filter or annotation so a new endpoint cannot forget it.
+
+**Likely questions**
+- *What are the limitations of your approach?* Duplicates hold a connection while they wait; the 5 second lock timeout bounds the wait; failures are not remembered; expired rows are not cleaned up; it is tested on one database, not across several application instances (which the database constraint would still handle correctly).
