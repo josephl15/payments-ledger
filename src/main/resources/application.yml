@@ -7,13 +7,26 @@ spring:
     url: ${SPRING_DATASOURCE_URL:jdbc:postgresql://localhost:5432/ledger}
     username: ${SPRING_DATASOURCE_USERNAME:ledger}
     password: ${SPRING_DATASOURCE_PASSWORD:ledger}
+    hikari:
+      # Explicit pool size (Hikari's default is also 10, but stating it makes the limit visible and testable).
+      maximum-pool-size: 10
+      # Give up after 10 s waiting for a free connection instead of the 30 s default.
+      connection-timeout: 10000
+      # Postgres waits forever for a row/table lock by default; this makes every pooled connection fail a lock wait after 5 s (SQLSTATE 55P03).
+      connection-init-sql: "SET lock_timeout = '5s'"
   jpa:
+    # Stops one EntityManager spanning the whole HTTP request, which would hand stale entities to later lock queries and hold a connection while rendering JSON.
+    open-in-view: false
     hibernate:
       # Hibernate only checks that mapped entities match the schema; Flyway owns the schema. Never update/create.
       ddl-auto: validate
   flyway:
     # Run the SQL files in classpath:db/migration at startup, before JPA starts.
     enabled: true
+  mvc:
+    # Framework errors (404, 405, bad JSON...) come back as RFC 7807 application/problem+json.
+    problemdetails:
+      enabled: true
 
 management:
   endpoints:

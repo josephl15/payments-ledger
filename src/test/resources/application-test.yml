@@ -1,0 +1,8 @@
+# Loaded only under @ActiveProfiles("test"); overrides application.yml for integration tests.
+spring:
+  datasource:
+    hikari:
+      # Pool at least as large as the concurrency-test worker threads (Phase 4), so requests never queue for a connection while holding locks.
+      maximum-pool-size: 20
+      # A starved pool fails in 5 s instead of the 30 s default, so a pool bug shows up quickly.
+      connection-timeout: 5000
