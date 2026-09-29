@@ -1,0 +1,48 @@
+services:
+  # PostgreSQL 16, the same image tag the integration tests use (a unit test fails the build if they drift).
+  # ledger/ledger is a local-development credential only: the port below is loopback-bound and the values
+  # can be overridden through a gitignored .env file (see .env.example).
+  db:
+    image: postgres:16.15-alpine
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-ledger}
+      POSTGRES_USER: ${POSTGRES_USER:-ledger}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-ledger}
+    # Bound to 127.0.0.1 only, so the dev database with default credentials is not reachable from the LAN.
+    ports:
+      - "127.0.0.1:5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    # The app waits for this to pass (see depends_on below).
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-ledger} -d ${POSTGRES_DB:-ledger}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  app:
+    build: .
+    # service_healthy, not just "started": Flyway runs at app startup and would crash on a database
+    # that is not accepting connections yet.
+    depends_on:
+      db:
+        condition: service_healthy
+    # Inside the Compose network the database host is the service name "db", not localhost.
+    # These names are read by the ${...} placeholders in application.yml.
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:postgresql://db:5432/${POSTGRES_DB:-ledger}
+      SPRING_DATASOURCE_USERNAME: ${POSTGRES_USER:-ledger}
+      SPRING_DATASOURCE_PASSWORD: ${POSTGRES_PASSWORD:-ledger}
+    # Loopback-bound for the same reason as the database port.
+    ports:
+      - "127.0.0.1:8080:8080"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8080/actuator/health"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+      # Give Spring Boot and Flyway time to start before failed checks count.
+      start_period: 30s
+
+volumes:
+  pgdata:

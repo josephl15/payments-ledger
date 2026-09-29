@@ -47,6 +47,9 @@ dependencies {
 tasks.test {
     // Without this Gradle finds no JUnit 5 tests and reports success with zero tests run.
     useJUnitPlatform()
+    // PostgresImageTagConsistencyTest reads docker-compose.yml at runtime. Declaring it as an input makes
+    // Gradle re-run the tests when only that file changes, instead of skipping them as up to date.
+    inputs.file("docker-compose.yml")
     testLogging {
         events("passed", "failed", "skipped")
     }
