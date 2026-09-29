@@ -1,0 +1,23 @@
+spring:
+  # Name shown in logs and actuator metadata.
+  application:
+    name: ledger-service
+  datasource:
+    # Env vars win; the fallbacks are local-dev defaults matching the Compose database (Plan 01-02).
+    url: ${SPRING_DATASOURCE_URL:jdbc:postgresql://localhost:5432/ledger}
+    username: ${SPRING_DATASOURCE_USERNAME:ledger}
+    password: ${SPRING_DATASOURCE_PASSWORD:ledger}
+  jpa:
+    hibernate:
+      # Hibernate only checks that mapped entities match the schema; Flyway owns the schema. Never update/create.
+      ddl-auto: validate
+  flyway:
+    # Run the SQL files in classpath:db/migration at startup, before JPA starts.
+    enabled: true
+
+management:
+  endpoints:
+    web:
+      exposure:
+        # Expose only /actuator/health; env, beans, etc. stay hidden.
+        include: health

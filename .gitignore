@@ -1,0 +1,10 @@
+.gradle/
+build/
+out/
+bin/
+.idea/
+*.iml
+.env
+# Tool artifacts (not project source)
+.gsd/
+.claude/worktrees/
