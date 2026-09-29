@@ -165,3 +165,23 @@ export PATH="/c/Program Files/Docker/Docker/resources/bin:$PATH"
 - "Could not find a valid Docker environment" means Docker Desktop is not running. Start it and re-run.
 - A Flyway checksum error after editing a migration that was already applied: never edit an applied migration. Add a new, higher-numbered file instead. Locally, `docker compose down -v` deletes the Compose database so it can start clean. Migrations after `V1__baseline.sql` start at `V2` (Phase 2).
 - Port 5432 or 8080 already in use: something else is listening (often a Compose stack left running). Run `docker compose down -v` first.
+
+## Database triggers, in plain words
+
+A trigger is a small function the database runs automatically when something happens to a table. Here `forbid_mutation()` is attached to `ledger_entries` and `audit_log`; it raises an error whenever a row is updated or deleted, so the statement fails and nothing changes. A row-level trigger only fires once per affected row, so a statement that matches no rows never triggers it, and it does not fire for `TRUNCATE` at all. That is why each table has a second, statement-level `BEFORE TRUNCATE` trigger. The error carries SQLSTATE `P0001` (a `RAISE EXCEPTION`), which is how the tests recognise it. Flyway files are final once applied: to change a trigger, add a new `V` file.
+
+Other database error codes worth knowing from the tests: `23505` unique violation, `23514` check violation, `23503` foreign-key violation, `22001` value too long. PostgreSQL also reports the name of the constraint, which is why every constraint has an explicit name.
+
+## What `ddl-auto=validate` does and does not check
+
+With `validate`, Hibernate compares each entity with the real table at startup and refuses to start if a table, column or column type is missing or different. Flyway creates the schema; Hibernate never changes it. Typical messages: `missing column [amount_minors] in table [ledger_entries]` (typo), `wrong column type ... found [bpchar (Types#CHAR)], but expecting [varchar(255) (Types#VARCHAR)]` (a `CHAR(3)` column), `missing sequence [ledger_entries_SEQ]` (identity column mapped with plain `@GeneratedValue`). Validate is lenient in places: it accepts a primitive `long` for a nullable column (it fails later with a NullPointerException when a NULL row is loaded) and an `Instant` for a `timestamp` without time zone. So each entity has a save-and-load-back test.
+
+## JPA entities and `@Immutable`, briefly
+
+An entity is a plain Java class mapped to a table with annotations (`@Entity`, `@Table`, `@Column`, `@Id`). JPA needs a no-argument constructor, so entities here have a protected one plus a public constructor for application code, and explicit getters (no Lombok). Entities refer to each other by id (a `UUID` field), not by `@ManyToOne` links, to keep the SQL obvious. `@Immutable` tells Hibernate the row never changes, so it never sends an UPDATE for it even if a field is modified in memory. Each column is also `updatable = false`. The database triggers are the layer that stops everything else.
+
+Repositories extend `Repository<T, ID>`, the empty base interface, and declare only the methods wanted (`save`, `findById`, finders). `JpaRepository` would bring `delete`, `deleteAll` and more. A reflection test fails the build if a delete or remove method is ever added to an append-only repository.
+
+## Why tests use unique data instead of cleaning up
+
+Deleting rows from the ledger is blocked by design, so tests cannot empty the tables. Each test makes its own user, account and transaction and only asserts on those (see docs/DECISIONS.md, entry 16). Two small traps: `Instant.now()` can have more precision than PostgreSQL stores (microseconds), so tests truncate with `truncatedTo(ChronoUnit.MICROS)` before comparing; and JSONB normalises key order and spacing, so JSON is compared as data, not as text.

@@ -72,3 +72,59 @@ CI workflow committed, not yet observed running.
 ### Bugs caught
 
 - Found by a run during Plan 01-02: the image-tag drift test was silently skipped by Gradle's up-to-date check when only `docker-compose.yml` changed, so the guard would have missed local drift. Fixed by declaring `docker-compose.yml` as a test input in build.gradle.kts, commit ab99a29.
+
+## Phase 2: Schema, triggers and domain model (brief phase 1)
+
+### Run details
+
+Date: 2026-09-29
+Commit tested: c6208c6 (working tree clean when the tests ran). Code commits: 5c81349 (migrations and SQL-level tests), 5433b6c (entities, repositories, mapping tests), c6208c6 (isolation strategy tests and corruption helper).
+
+Commands run for this entry (Git Bash, Windows 11, `JAVA_HOME` set to the JDK 21 install and the Docker CLI on PATH):
+
+- `./gradlew cleanTest test --console=plain` (output saved to docs/evidence/phase-2-test-output.txt, exit code 0, BUILD SUCCESSFUL)
+- a script that read every `build/test-results/test/*.xml` file and summed the `tests`, `skipped`, `failures` and `errors` attributes per class, grouped by class-name suffix
+
+### Test results
+
+Integration tests (*IntegrationTest): 71 run, 0 skipped, 0 failed, 0 errors
+Unit tests (*Test): 3 run, 0 skipped, 0 failed, 0 errors
+Total: 74 tests, 0 skipped, 0 failed, 0 errors
+
+Source: docs/evidence/phase-2-test-output.txt and build/test-results/test/*.xml after ./gradlew cleanTest test. The 11 Phase 1 tests (10 in `ToolchainSmokeIntegrationTest`, 1 in `PostgresImageTagConsistencyTest`) are unchanged and still pass; Phase 2 added 63 tests.
+
+Per class (tests from the XML):
+
+| Class | Tests | Category |
+|-------|-------|----------|
+| `LedgerConstraintsIntegrationTest` | 30 | integration |
+| `EntityMappingIntegrationTest` | 11 | integration |
+| `ToolchainSmokeIntegrationTest` | 10 | integration (Phase 1) |
+| `ImmutabilityTriggerIntegrationTest` | 9 | integration |
+| `SchemaMigrationIntegrationTest` | 6 | integration |
+| `TestIsolationIntegrationTest` | 5 | integration |
+| `ImmutableRepositoryShapeTest` | 2 | unit |
+| `PostgresImageTagConsistencyTest` | 1 | unit (Phase 1) |
+
+Trigger tests: `ImmutabilityTriggerIntegrationTest` has 9 tests. They cover UPDATE and DELETE on `ledger_entries` and `audit_log`, `TRUNCATE` of each table, `TRUNCATE ... CASCADE` reaching them from `ledger_entries`, `ledger_transactions`, `accounts` and `users`, and a multi-table `TRUNCATE`. Every rejected statement is asserted to fail with SQLSTATE `P0001` and the message "forbidden: the table is append-only", and the row is asserted unchanged afterwards. A further test in `TestIsolationIntegrationTest` shows the same UPDATE succeeding only inside `SET LOCAL session_replication_role = replica` and being rejected again afterwards.
+
+### Completed
+
+- SCHEMA-01: Flyway V2 creates the six tables; `SchemaMigrationIntegrationTest` checks versions 1 to 4 applied successfully, the tables, the named constraints and the indexes; `LedgerConstraintsIntegrationTest` (30 tests) rejects each broken row with the expected SQLSTATE and constraint name, including a zero amount, a second reversal of one transaction and a duplicate `(user_id, idem_key)`.
+- SCHEMA-02: V3 triggers, tested as above.
+- SCHEMA-03: V4 seeds `EXTERNAL_FUNDING` and `EXTERNAL_PAYOUTS` with fixed ids, NULL balance and NULL owner; checked in SQL (`SchemaMigrationIntegrationTest`) and through the repository, with `SystemAccountIds` compared to the database ids (`EntityMappingIntegrationTest`).
+- SCHEMA-04: customer balance below zero, wrong SYSTEM/CUSTOMER shape and bad currency are each rejected (`LedgerConstraintsIntegrationTest`).
+- SCHEMA-05: the application boots with `ddl-auto=validate` against the six entities; each entity round-trips; a modified `@Immutable` entry sends no UPDATE; `ImmutableRepositoryShapeTest` checks that the append-only repositories expose no delete or remove method and that none extends `JpaRepository` or `CrudRepository`.
+- SCHEMA-06: strategy recorded in docs/DECISIONS.md (entry 16) and demonstrated by `TestIsolationIntegrationTest`.
+- SCHEMA-07: docs/architecture.md (Mermaid ER diagram and "why the ledger entries are the source of truth").
+
+### Not completed
+
+- The Mermaid diagram in docs/architecture.md has not been rendered by any tool here; only its syntax was checked against the Mermaid documentation.
+- The two "pristine database" options in DECISIONS.md entry 16 (Flyway clean and migrate, `CREATE DATABASE` in the same container) were verified during research but are not built or tested in the repository.
+- Invariant 1 (each transaction sums to zero) is not enforced by the database in this phase; see DECISIONS.md entry 17.
+- Nothing has run on GitHub Actions (no remote repository exists), so no CI test count exists.
+
+### Bugs caught
+
+None by the tests in this phase: all new tests passed the first time they ran. One compile error in the test code (an ambiguous `assertThat` on a `TransactionTemplate` result in `EntityMappingIntegrationTest`) was fixed before the commit; it was caught by the compiler, not by a test, and is not counted as a bug in the product code.

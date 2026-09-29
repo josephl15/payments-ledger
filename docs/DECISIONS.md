@@ -1,6 +1,6 @@
 # Decisions
 
-Every non-obvious decision is recorded here with the options considered, the choice and the trade-off. Later phases append new entries; an entry is not rewritten when a decision changes, a new entry supersedes it. Entries below are from Phase 1 (setup and toolchain).
+Every non-obvious decision is recorded here with the options considered, the choice and the trade-off. Later phases append new entries; an entry is not rewritten when a decision changes, a new entry supersedes it. Entries 1 to 11 are from Phase 1 (setup and toolchain), entries 12 onwards from Phase 2 (schema, triggers and domain model).
 
 ## 1. Stay on Spring Boot 3.5.16, which is past open-source end of life
 
@@ -208,3 +208,117 @@ Leave it off. Adding the starter would put every endpoint behind authentication 
 
 **Trade-off**
 The security wiring is not exercised until Phase 6, so any endpoint added in Phases 3 to 5 is unauthenticated until then. That is acceptable only because the stack is local development, the ports are loopback-bound and the phases are built in that order; nothing built before Phase 6 should be treated as secured.
+
+## 12. Immutability by triggers, including TRUNCATE, not by privileges alone
+
+**Phase:** 2 | **Date:** 2026-09-29 | **Status:** Accepted
+
+**Context**
+Ledger entries and the audit log must never change (invariant 4). Something has to stop an UPDATE or DELETE that does not go through the Java code.
+
+**Options**
+- Trigger functions that raise an error on UPDATE, DELETE and TRUNCATE.
+- `REVOKE UPDATE, DELETE, TRUNCATE` from the application database role.
+- Both.
+
+**Choice**
+Triggers only, in V3: a row-level `BEFORE UPDATE OR DELETE` trigger and a statement-level `BEFORE TRUNCATE` trigger on each of `ledger_entries` and `audit_log`. A row-level trigger does not fire for TRUNCATE, so without the second trigger `TRUNCATE ledger_entries` would empty the ledger; the tests would catch that. The trigger raises SQLSTATE `P0001`, and tests assert the SQLSTATE and message through JDBC (Spring does not translate it to a specific exception class). Java adds a second layer: the entities are `@Immutable` and the repositories extend `Repository`, not `JpaRepository`, so there is no delete method to call.
+
+**Trade-off**
+Compose runs the application as the database owner, so the owner can still run `ALTER TABLE ... DISABLE TRIGGER` or drop the table. The triggers stop application bugs and casual SQL, not a privileged DBA, and the README says so. Revoking the privileges from a separate low-privilege application role is the production hardening step and is deferred because it needs a second database role and migration user.
+
+**Revisit if**
+The service is ever run against a shared or production database: then add the separate application role and REVOKE.
+
+## 13. VARCHAR plus CHECK for currency and enumerations, not CHAR(3) or native enums
+
+**Phase:** 2 | **Date:** 2026-09-29 | **Status:** Accepted
+
+**Context**
+`ddl-auto=validate` compares the entity mapping with the real column types.
+
+**Options**
+- `CHAR(3)` for currency and native PostgreSQL `ENUM` types.
+- `VARCHAR(3)` with `CHECK (currency ~ '^[A-Z]{3}$')`, and `VARCHAR` with a `CHECK ... IN (...)` mapped with `@Enumerated(EnumType.STRING)`.
+
+**Choice**
+`VARCHAR` plus `CHECK`. A `CHAR(3)` column is reported by PostgreSQL as `bpchar`, and Hibernate validation fails with `found [bpchar (Types#CHAR)], but expecting [varchar(255) (Types#VARCHAR)]`. Native enums need extra mapping. A `CHECK` gives the same protection, and a new value is added with a normal migration. Timestamps are `TIMESTAMPTZ` mapped to `Instant`.
+
+**Trade-off**
+Enum names live in two places (the Java enum and the CHECK), so adding a value needs a migration and a code change; the round-trip tests catch a mismatch. Validate is lenient in some cases (it accepts a primitive `long` on a nullable column and an `Instant` on a plain `timestamp`), so the round-trip tests, not validate, are what prove the mappings.
+
+**Revisit if**
+The list of enum values starts changing often.
+
+## 14. Identity ids for entries, keys and audit rows; UUIDs for users, accounts and transactions
+
+**Phase:** 2 | **Date:** 2026-09-29 | **Status:** Accepted
+
+**Context**
+Every table needs a primary key, and Hibernate must be able to insert without surprises.
+
+**Options**
+- UUIDs everywhere.
+- `BIGINT GENERATED ALWAYS AS IDENTITY` for high-volume append-only tables, UUIDs for the rest.
+
+**Choice**
+UUIDs (`GenerationType.UUID`) for `users`, `accounts` and `ledger_transactions`, because ids are exposed in the API and should not be guessable or countable. Identity columns for `ledger_entries`, `idempotency_keys` and `audit_log`. With an assigned id, Spring Data `save()` first runs a SELECT to decide between insert and update; with an identity column it just inserts. `GENERATED ALWAYS` means the application can never supply an id, and a test checks that. The mapping must be `GenerationType.IDENTITY`; the default `AUTO` fails validation with `missing sequence [ledger_entries_SEQ]`.
+
+**Trade-off**
+Two id styles in one schema. Identity ids also give a cheap "newest first" order for history (`ORDER BY id DESC`), though under heavy concurrency identity order can differ slightly from commit order.
+
+**Revisit if**
+Entry ids ever need to be exposed publicly.
+
+## 15. System accounts have fixed ids and no cached balance
+
+**Phase:** 2 | **Date:** 2026-09-29 | **Status:** Accepted
+
+**Context**
+Every deposit needs a counter-side account representing the outside world. If it kept a cached balance, every deposit would update and lock the same row.
+
+**Choice**
+Two SYSTEM accounts, `EXTERNAL_FUNDING` and `EXTERNAL_PAYOUTS`, are inserted by migration V4 with fixed ids (`...0001`, `...0002`), mirrored by `SystemAccountIds` constants that a test checks against the database. `balance_minor` is NULL for them (enforced by `ck_accounts_balance_shape`), they have no owner (`ck_accounts_owner_shape`), and they are never locked or updated. Their balance, when needed, is derived by summing entries. `EXTERNAL_PAYOUTS` is reserved for withdrawals, a deferred requirement, and has no consumer yet.
+
+**Trade-off**
+Their balance is a sum over all their entries, so it is slower to read; that is acceptable because nothing reads it on a hot path. Boxed `Long` is required for the nullable balance in Java.
+
+**Revisit if**
+Withdrawals are dropped for good (then remove `EXTERNAL_PAYOUTS` in a new migration).
+
+## 16. Test isolation: unique data per test, because the ledger cannot be cleaned
+
+**Phase:** 2 | **Date:** 2026-09-29 | **Status:** Accepted
+
+**Context**
+The immutability triggers block DELETE and TRUNCATE, so the usual "empty the tables after each test" is impossible, and all test classes share one PostgreSQL container.
+
+**Options**
+- (a) Weaken or drop the triggers in tests, then clean up.
+- (b) Every test creates its own users, accounts and transactions with unique ids and asserts only on that data.
+- (c) A fresh database per test class: Flyway `clean()` then `migrate()` with `spring.flyway.clean-disabled=false` in that test only, or `CREATE DATABASE` inside the same container with a sibling base class.
+
+**Choice**
+(b) is the default, shown by `LedgerTestData` and `TestIsolationIntegrationTest` (two tests of the same shape that pass in any order). Never assert on whole-table counts. The production triggers are never weakened. Tests that must inject bad data use `ReplicaRole.asReplica`, which runs one transaction with `SET LOCAL session_replication_role = replica` (triggers and foreign keys off, CHECK constraints still on, reverts automatically) and cleans up in a `finally`. Option (c) was verified in research but not built here; it is for later whole-ledger checks that need a pristine database.
+
+**Trade-off**
+The database accumulates test data during a run, so no test can assume the ledger is empty. Replica mode needs a superuser, which the Testcontainers user is. Flyway `clean()` wipes the shared database, so it is only safe while test classes run one at a time, which is Gradle's default.
+
+**Revisit if**
+Test parallelism is turned on, or a whole-ledger sum check is needed (use (c)).
+
+## 17. The zero-sum rule is enforced by the service, not the database
+
+**Phase:** 2 | **Date:** 2026-09-29 | **Status:** Accepted
+
+**Context**
+Invariant 1 says every transaction's entries sum to zero. A deferrable constraint trigger could enforce that in the database.
+
+**Choice**
+Not built (a stretch item). The posting service (Phase 3) creates balanced entries and reconciliation (Phase 4) verifies every transaction sums to zero. The database does enforce the parts that are simple constraints: non-zero amounts, non-negative customer balances, at-most-once reversal, at-most-once idempotency key. One rule was added beyond the brief: `ck_ledger_tx_reversal_shape`, so exactly REVERSAL transactions carry a `reverses_transaction_id` and none points at itself.
+
+**Trade-off**
+A bug in the service could write an unbalanced transaction and the database would accept it; reconciliation would detect it afterwards.
+
+**Revisit if**
+There is time for the stretch trigger.
