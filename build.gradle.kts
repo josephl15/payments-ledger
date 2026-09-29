@@ -28,6 +28,14 @@ dependencies {
     implementation("org.springframework.boot:spring-boot-starter-actuator")
     implementation("org.springframework.boot:spring-boot-starter-validation")
 
+    // Spring Security: the filter chain that rejects requests without a valid token, plus the BCrypt password encoder.
+    implementation("org.springframework.boot:spring-boot-starter-security")
+    // jjwt: builds and verifies JWTs. Not managed by the Boot BOM, so the version is pinned here. api is the code we
+    // call; impl and jackson are only needed when the app runs (jackson = JSON binding for the token payload).
+    implementation("io.jsonwebtoken:jjwt-api:0.13.0")
+    runtimeOnly("io.jsonwebtoken:jjwt-impl:0.13.0")
+    runtimeOnly("io.jsonwebtoken:jjwt-jackson:0.13.0")
+
     // Flyway: versioned SQL migrations. The PostgreSQL module is separate since Flyway 10 (without it: "Unsupported Database").
     implementation("org.flywaydb:flyway-core")
     runtimeOnly("org.flywaydb:flyway-database-postgresql")

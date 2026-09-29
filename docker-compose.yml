@@ -33,6 +33,9 @@ services:
       SPRING_DATASOURCE_URL: jdbc:postgresql://db:5432/${POSTGRES_DB:-ledger}
       SPRING_DATASOURCE_USERNAME: ${POSTGRES_USER:-ledger}
       SPRING_DATASOURCE_PASSWORD: ${POSTGRES_PASSWORD:-ledger}
+      # Signing key for login tokens. No default on purpose: ":?" makes Compose stop with this message if it is unset.
+      # Spring binds LEDGER_JWT_SECRET to ledger.jwt.secret (see JwtProperties). Put it in your shell or in .env.
+      LEDGER_JWT_SECRET: ${LEDGER_JWT_SECRET:?Set LEDGER_JWT_SECRET (32+ characters, see .env.example)}
     # Loopback-bound for the same reason as the database port.
     ports:
       - "127.0.0.1:8080:8080"

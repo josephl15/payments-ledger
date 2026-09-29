@@ -32,7 +32,6 @@ import org.springframework.test.web.servlet.MvcResult;
 @Import(AbstractIdempotencyIntegrationTest.ClockConfig.class)
 abstract class AbstractIdempotencyIntegrationTest extends AbstractPostgresIntegrationTest {
 
-    static final String ACTING_USER = "X-Acting-User-Id";
     static final String IDEMPOTENCY_KEY = "Idempotency-Key";
     static final String PROBLEM_JSON = "application/problem+json";
 
@@ -64,8 +63,24 @@ abstract class AbstractIdempotencyIntegrationTest extends AbstractPostgresIntegr
     @Autowired
     DepositService depositService;
 
+    private AuthTestClient authClient;
+
+    /** A real user, registered and logged in through the API (POST /api/auth/register and /login). */
     UUID newUser() {
-        return new LedgerTestData(jdbc).newUser();
+        if (authClient == null) {
+            authClient = new AuthTestClient(mvc, json);
+        }
+        return authClient.newUser();
+    }
+
+    /** The raw token of a user created with {@link #newUser()}. */
+    String token(UUID user) {
+        return authClient.token(user);
+    }
+
+    /** The Authorization header value ("Bearer <token>") of a user created with {@link #newUser()}. */
+    String bearer(UUID user) {
+        return authClient.bearer(user);
     }
 
     /** A new account for the user, funded with {@code balanceMinor} through the real deposit service (0 = unfunded). */
@@ -89,7 +104,7 @@ abstract class AbstractIdempotencyIntegrationTest extends AbstractPostgresIntegr
 
     /** POSTs with the given Idempotency-Key ({@code null} = header not sent). */
     MvcResult send(String path, UUID user, String key, String body) throws Exception {
-        var request = post(path).header(ACTING_USER, user).contentType(MediaType.APPLICATION_JSON).content(body);
+        var request = post(path).header("Authorization", bearer(user)).contentType(MediaType.APPLICATION_JSON).content(body);
         if (key != null) {
             request = request.header(IDEMPOTENCY_KEY, key);
         }

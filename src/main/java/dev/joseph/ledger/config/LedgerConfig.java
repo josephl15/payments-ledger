@@ -10,7 +10,7 @@ import org.springframework.context.annotation.Configuration;
  * creates once and hands to any class that asks for it in its constructor.
  */
 @Configuration
-@EnableConfigurationProperties(LedgerProperties.class)
+@EnableConfigurationProperties({LedgerProperties.class, JwtProperties.class})
 public class LedgerConfig {
 
     /**

@@ -12,3 +12,11 @@ spring:
       # that a concurrency test opened close after 10 seconds (10 s is Hikari's minimum idle timeout).
       minimum-idle: 2
       idle-timeout: 10000
+
+ledger:
+  jwt:
+    # A fake key for tests only (never used anywhere else). 32+ characters as the validation requires.
+    secret: test-only-secret-not-for-real-use-0123456789
+    # Long on purpose: some tests move the shared MutableClock forward by 25 hours (idempotency expiry) and must not
+    # expire the tokens of the users they created earlier. The token-expiry test moves the clock further than this.
+    ttl: 2d

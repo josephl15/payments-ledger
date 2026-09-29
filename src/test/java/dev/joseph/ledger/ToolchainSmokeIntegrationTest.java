@@ -4,14 +4,20 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.zaxxer.hikari.HikariDataSource;
+import dev.joseph.ledger.domain.Role;
+import dev.joseph.ledger.security.JwtService;
 import java.sql.Connection;
 import java.sql.SQLException;
 import java.sql.Statement;
+import java.util.UUID;
 import javax.sql.DataSource;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.web.client.TestRestTemplate;
 import org.springframework.core.env.Environment;
+import org.springframework.http.HttpEntity;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.HttpMethod;
 import org.springframework.http.ResponseEntity;
 import org.springframework.jdbc.core.JdbcTemplate;
 
@@ -34,6 +40,9 @@ class ToolchainSmokeIntegrationTest extends AbstractPostgresIntegrationTest {
 
     @Autowired
     TestRestTemplate rest;
+
+    @Autowired
+    JwtService jwtService;
 
     @Test
     void runsAgainstPostgres16() {
@@ -103,17 +112,32 @@ class ToolchainSmokeIntegrationTest extends AbstractPostgresIntegrationTest {
         }
     }
 
+    /** A signed-in caller (a valid token; these routes never touch the database, so the user id need not exist). */
+    private HttpEntity<Void> signedIn() {
+        HttpHeaders headers = new HttpHeaders();
+        headers.setBearerAuth(jwtService.issue(UUID.randomUUID(), Role.USER));
+        return new HttpEntity<>(headers);
+    }
+
     @Test
     void unknownPathReturnsProblemJson() {
-        ResponseEntity<String> response = rest.getForEntity("/nope", String.class);
+        ResponseEntity<String> response = rest.exchange("/nope", HttpMethod.GET, signedIn(), String.class);
         assertThat(response.getStatusCode().value()).isEqualTo(404);
         assertThat(response.getHeaders().getContentType()).isNotNull();
         assertThat(response.getHeaders().getContentType().toString()).startsWith("application/problem+json");
     }
 
     @Test
+    void anUnauthenticatedCallerGets401ProblemJsonEvenForAnUnknownPath() {
+        ResponseEntity<String> response = rest.getForEntity("/nope", String.class);
+        assertThat(response.getStatusCode().value()).isEqualTo(401);
+        assertThat(response.getHeaders().getContentType().toString()).startsWith("application/problem+json");
+    }
+
+    @Test
     void onlyHealthEndpointIsExposed() {
-        ResponseEntity<String> response = rest.getForEntity("/actuator/env", String.class);
+        ResponseEntity<String> response =
+                rest.exchange("/actuator/env", HttpMethod.GET, signedIn(), String.class);
         assertThat(response.getStatusCode().value()).isEqualTo(404);
     }
 

@@ -13,6 +13,8 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import dev.joseph.ledger.config.LedgerProperties;
+import dev.joseph.ledger.domain.Role;
+import dev.joseph.ledger.security.JwtService;
 import java.util.UUID;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -33,7 +35,6 @@ import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilde
 @AutoConfigureMockMvc
 class LedgerApiIntegrationTest extends AbstractPostgresIntegrationTest {
 
-    private static final String ACTING_USER = "X-Acting-User-Id";
     private static final String PROBLEM_JSON = "application/problem+json";
 
     @Autowired
@@ -48,8 +49,21 @@ class LedgerApiIntegrationTest extends AbstractPostgresIntegrationTest {
     @Autowired
     LedgerProperties properties;
 
+    @Autowired
+    JwtService jwtService;
+
+    private AuthTestClient authClient;
+
+    /** A real user, registered and logged in through the API. */
     private UUID newUser() {
-        return new LedgerTestData(jdbc).newUser();
+        if (authClient == null) {
+            authClient = new AuthTestClient(mvc, json);
+        }
+        return authClient.newUser();
+    }
+
+    private String bearer(UUID user) {
+        return authClient.bearer(user);
     }
 
     private ResultActions send(MockHttpServletRequestBuilder request) throws Exception {
@@ -58,7 +72,7 @@ class LedgerApiIntegrationTest extends AbstractPostgresIntegrationTest {
 
     private UUID openAccount(UUID user) throws Exception {
         String body = send(post("/api/accounts")
-                        .header(ACTING_USER, user)
+                        .header("Authorization", bearer(user))
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"name\":\"Main\"}"))
                 .andExpect(status().isCreated())
@@ -71,7 +85,7 @@ class LedgerApiIntegrationTest extends AbstractPostgresIntegrationTest {
     /** Deposits and transfers require an Idempotency-Key (Phase 5); a fresh one per call, so calls never replay each other. */
     private ResultActions postJson(String path, UUID user, String body) throws Exception {
         return send(post(path)
-                .header(ACTING_USER, user)
+                .header("Authorization", bearer(user))
                 .header("Idempotency-Key", UUID.randomUUID().toString())
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(body));
@@ -107,7 +121,7 @@ class LedgerApiIntegrationTest extends AbstractPostgresIntegrationTest {
         openAccount(other);
 
         send(post("/api/accounts")
-                        .header(ACTING_USER, user)
+                        .header("Authorization", bearer(user))
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"name\":\"Savings\"}"))
                 .andExpect(status().isCreated())
@@ -117,11 +131,11 @@ class LedgerApiIntegrationTest extends AbstractPostgresIntegrationTest {
                 .andExpect(jsonPath("$.status").value("ACTIVE"))
                 .andExpect(jsonPath("$.balanceMinor").value(0));
 
-        send(get("/api/accounts").header(ACTING_USER, user))
+        send(get("/api/accounts").header("Authorization", bearer(user)))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$", hasSize(2)));
 
-        send(get("/api/accounts/" + account).header(ACTING_USER, user))
+        send(get("/api/accounts/" + account).header("Authorization", bearer(user)))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.id").value(account.toString()))
                 .andExpect(jsonPath("$.balanceMinor").value(0));
@@ -133,8 +147,8 @@ class LedgerApiIntegrationTest extends AbstractPostgresIntegrationTest {
         UUID intruder = newUser();
         UUID account = openAccount(owner);
 
-        expectProblem(send(get("/api/accounts/" + account).header(ACTING_USER, intruder)), 404);
-        expectProblem(send(get("/api/accounts/" + UUID.randomUUID()).header(ACTING_USER, owner)), 404);
+        expectProblem(send(get("/api/accounts/" + account).header("Authorization", bearer(intruder))), 404);
+        expectProblem(send(get("/api/accounts/" + UUID.randomUUID()).header("Authorization", bearer(owner))), 404);
     }
 
     @Test
@@ -148,14 +162,21 @@ class LedgerApiIntegrationTest extends AbstractPostgresIntegrationTest {
     }
 
     @Test
-    void missingOrMalformedActingUserHeaderIsBadRequest() throws Exception {
-        expectProblem(send(get("/api/accounts")), 400);
-        expectProblem(send(get("/api/accounts").header(ACTING_USER, "not-a-uuid")), 400);
+    void missingOrMalformedTokenIsUnauthorized() throws Exception {
+        expectProblem(send(get("/api/accounts")), 401);
+        expectProblem(send(get("/api/accounts").header("Authorization", "Bearer not-a-jwt")), 401);
     }
 
+    /** A perfectly valid token whose user no longer exists (for example deleted after login) cannot open an account. */
     @Test
-    void anActingUserWhoDoesNotExistCannotOpenAnAccount() throws Exception {
-        expectProblem(postJson("/api/accounts", UUID.randomUUID(), "{\"name\":\"Main\"}"), 404);
+    void aTokenForAUserWhoDoesNotExistCannotOpenAnAccount() throws Exception {
+        String token = jwtService.issue(UUID.randomUUID(), Role.USER);
+        expectProblem(
+                send(post("/api/accounts")
+                        .header("Authorization", "Bearer " + token)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"name\":\"Main\"}")),
+                404);
     }
 
     // ---------------------------------------------------------------- deposits and transfers
@@ -187,7 +208,7 @@ class LedgerApiIntegrationTest extends AbstractPostgresIntegrationTest {
         }
         assertThat(sum).isZero();
 
-        send(get("/api/accounts/" + from).header(ACTING_USER, user)).andExpect(jsonPath("$.balanceMinor").value(7_500));
+        send(get("/api/accounts/" + from).header("Authorization", bearer(user))).andExpect(jsonPath("$.balanceMinor").value(7_500));
         assertThat(jdbc.queryForObject("SELECT balance_minor FROM accounts WHERE id = ?", Long.class, to))
                 .isEqualTo(2_500L);
     }

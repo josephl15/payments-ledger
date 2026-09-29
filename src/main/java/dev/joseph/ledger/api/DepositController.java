@@ -1,5 +1,6 @@
 package dev.joseph.ledger.api;
 
+import dev.joseph.ledger.security.CurrentUserProvider;
 import dev.joseph.ledger.service.DepositCommand;
 import dev.joseph.ledger.service.DepositService;
 import dev.joseph.ledger.service.IdempotentExecutor;
@@ -7,7 +8,6 @@ import dev.joseph.ledger.service.IdempotentOutcome;
 import dev.joseph.ledger.service.PostedTransaction;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
-import java.util.UUID;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -26,10 +26,13 @@ public class DepositController {
 
     private final DepositService depositService;
     private final IdempotentExecutor idempotentExecutor;
+    private final CurrentUserProvider currentUser;
 
-    public DepositController(DepositService depositService, IdempotentExecutor idempotentExecutor) {
+    public DepositController(
+            DepositService depositService, IdempotentExecutor idempotentExecutor, CurrentUserProvider currentUser) {
         this.depositService = depositService;
         this.idempotentExecutor = idempotentExecutor;
+        this.currentUser = currentUser;
     }
 
     /**
@@ -39,13 +42,12 @@ public class DepositController {
      */
     @PostMapping
     public ResponseEntity<String> deposit(
-            @RequestHeader(StubActingUser.HEADER) UUID actingUserId,
             @RequestHeader(value = IdempotentResponses.KEY_HEADER, required = false) String idempotencyKey,
             @Valid @RequestBody DepositRequest request,
             HttpServletRequest http) {
         DepositCommand command =
                 new DepositCommand(request.accountId(), request.amountMinor(), request.currency(), request.reference());
-        var actor = StubActingUser.from(actingUserId);
+        var actor = currentUser.current();
         return IdempotentResponses.toResponse(idempotentExecutor.execute(
                 actor, idempotencyKey, http.getMethod(), http.getRequestURI(), request, () -> {
                     PostedTransaction posted = depositService.deposit(actor, command);

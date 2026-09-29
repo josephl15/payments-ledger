@@ -1,8 +1,10 @@
 package dev.joseph.ledger.api;
 
 import dev.joseph.ledger.service.AccountNotUsableException;
+import dev.joseph.ledger.service.DuplicateUsernameException;
 import dev.joseph.ledger.service.IdempotencyKeyMismatchException;
 import dev.joseph.ledger.service.InsufficientFundsException;
+import dev.joseph.ledger.service.InvalidCredentialsException;
 import dev.joseph.ledger.service.InvalidRequestException;
 import dev.joseph.ledger.service.ResourceNotFoundException;
 import java.util.List;
@@ -52,6 +54,20 @@ public class ApiExceptionHandler extends ResponseEntityExceptionHandler {
     @ExceptionHandler(IdempotencyKeyMismatchException.class)
     ProblemDetail idempotencyKeyMismatch(IdempotencyKeyMismatchException ex) {
         return problem(HttpStatus.UNPROCESSABLE_ENTITY, "Idempotency key reused", ex.getMessage());
+    }
+
+    /** Registration with a taken username: 409. (The unique constraint on users.username is the real guarantee.) */
+    @ExceptionHandler(DuplicateUsernameException.class)
+    ProblemDetail duplicateUsername(DuplicateUsernameException ex) {
+        return problem(HttpStatus.CONFLICT, "Username taken", ex.getMessage());
+    }
+
+    /** Wrong password and unknown username produce this same response, so usernames cannot be enumerated. */
+    @ExceptionHandler(InvalidCredentialsException.class)
+    ResponseEntity<ProblemDetail> invalidCredentials(InvalidCredentialsException ex) {
+        return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
+                .header(HttpHeaders.WWW_AUTHENTICATE, "Bearer")
+                .body(problem(HttpStatus.UNAUTHORIZED, "Invalid credentials", ex.getMessage()));
     }
 
     @ExceptionHandler(InvalidRequestException.class)

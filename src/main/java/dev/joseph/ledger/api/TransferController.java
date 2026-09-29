@@ -1,5 +1,6 @@
 package dev.joseph.ledger.api;
 
+import dev.joseph.ledger.security.CurrentUserProvider;
 import dev.joseph.ledger.service.IdempotentExecutor;
 import dev.joseph.ledger.service.IdempotentOutcome;
 import dev.joseph.ledger.service.PostedTransaction;
@@ -7,7 +8,6 @@ import dev.joseph.ledger.service.TransferCommand;
 import dev.joseph.ledger.service.TransferService;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
-import java.util.UUID;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -26,15 +26,17 @@ public class TransferController {
 
     private final TransferService transferService;
     private final IdempotentExecutor idempotentExecutor;
+    private final CurrentUserProvider currentUser;
 
-    public TransferController(TransferService transferService, IdempotentExecutor idempotentExecutor) {
+    public TransferController(
+            TransferService transferService, IdempotentExecutor idempotentExecutor, CurrentUserProvider currentUser) {
         this.transferService = transferService;
         this.idempotentExecutor = idempotentExecutor;
+        this.currentUser = currentUser;
     }
 
     @PostMapping
     public ResponseEntity<String> transfer(
-            @RequestHeader(StubActingUser.HEADER) UUID actingUserId,
             @RequestHeader(value = IdempotentResponses.KEY_HEADER, required = false) String idempotencyKey,
             @Valid @RequestBody TransferRequest request,
             HttpServletRequest http) {
@@ -44,7 +46,7 @@ public class TransferController {
                 request.amountMinor(),
                 request.currency(),
                 request.reference());
-        var actor = StubActingUser.from(actingUserId);
+        var actor = currentUser.current();
         return IdempotentResponses.toResponse(idempotentExecutor.execute(
                 actor, idempotencyKey, http.getMethod(), http.getRequestURI(), request, () -> {
                     PostedTransaction posted = transferService.transfer(actor, command);

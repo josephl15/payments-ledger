@@ -20,6 +20,11 @@ spring:
     hibernate:
       # Hibernate only checks that mapped entities match the schema; Flyway owns the schema. Never update/create.
       ddl-auto: validate
+  autoconfigure:
+    exclude:
+      # Spring Boot would otherwise create a default in-memory user with a random password and print it in the log.
+      # This app authenticates with its own users table and JWTs, so that default user must not exist.
+      - org.springframework.boot.autoconfigure.security.servlet.UserDetailsServiceAutoConfiguration
   flyway:
     # Run the SQL files in classpath:db/migration at startup, before JPA starts.
     enabled: true
@@ -48,3 +53,8 @@ ledger:
   max-amount-minor: 100000000
   # How long an Idempotency-Key is remembered. After this the same key may be used for a new request. Bound to LedgerProperties.
   idempotency-ttl: 24h
+  # JWT settings are bound to JwtProperties. The signing secret is NOT here on purpose: it comes only from the
+  # environment variable LEDGER_JWT_SECRET (32+ characters) and the application refuses to start without it.
+  # ledger.jwt.ttl is how long a login token lives (default 1h).
+  jwt:
+    ttl: 1h
