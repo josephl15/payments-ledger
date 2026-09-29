@@ -73,10 +73,13 @@ Later study pointer: starting Spring Boot with the `--debug` argument prints a r
 Prerequisite: Docker Desktop running. From the repository root, in Git Bash (add the Docker CLI to PATH if `docker` is not found, see Windows notes):
 
 ```bash
+export LEDGER_JWT_SECRET="$(openssl rand -base64 48)"   # required since Phase 6: any 32+ character text
 docker compose up --build -d --wait
 curl -fsS http://localhost:8080/actuator/health
 docker compose down -v
 ```
+
+`LEDGER_JWT_SECRET` has no default: Compose stops with an error if it is unset, and the application refuses to start if it is under 32 characters. Put it in your shell, or in a `.env` file (copy `.env.example`, git ignores `.env`). Remember to have it set for `docker compose down -v` too, because Compose reads the file before it stops anything.
 
 - `docker compose up --build -d --wait` builds the app image, starts PostgreSQL and the app in the background, and returns once both report healthy. This is the exact form run in Phase 1. Plain `docker compose up` starts the same two services in the foreground and streams their logs; that foreground form was not run separately.
 - The first run pulls base images and compiles the jar inside Docker, which took about 1.5 minutes cold. Later runs use the cache.
@@ -194,7 +197,7 @@ Deleting rows from the ledger is blocked by design, so tests cannot empty the ta
 - **`@RestControllerAdvice` and `ProblemDetail`.** One class turns exceptions into `application/problem+json` responses (RFC 7807: `status`, `title`, `detail`, plus extra fields). It extends `ResponseEntityExceptionHandler` so Spring's own errors (unreadable JSON, missing header) use the same format.
 - **`@ConfigurationProperties`.** `LedgerProperties` is a record bound from the `ledger:` block of application.yml, so the maximum amount is a setting, not a constant in code. `@EnableConfigurationProperties` registers it as a bean.
 - **A `Clock` bean.** Services ask the clock for the time instead of calling `Instant.now()`, so a test could inject a fixed clock.
-- **Profiles.** `@Profile("dev")` on `DevStubUserSeeder` means it only exists when `SPRING_PROFILES_ACTIVE=dev`. To try the API by hand, run with that profile and send `X-Acting-User-Id: 00000000-0000-0000-0000-00000000d001`.
+- **Profiles.** `@Profile("dev")` marks a bean that only exists when `SPRING_PROFILES_ACTIVE=dev` (Phase 3 used it for a dev user seeder; Phase 6 deleted that, users now register through the API).
 - **MockMvc.** `@AutoConfigureMockMvc` gives a `MockMvc` that calls the controllers through Spring MVC without a network socket, using the real Jackson, validation and exception handler.
 - **`@MockitoSpyBean`.** Wraps a real bean in a Mockito spy so one call can be changed while the rest stays real. The injected field is the transactional proxy around the spy, so stubbing is done on `AopTestUtils.getTargetObject(bean)`; stubbing through the proxy calls the real method outside a transaction.
 
@@ -242,3 +245,33 @@ The natural idempotency code looks like this: try to insert the key; if it fails
 - **Every existing call to the two endpoints needed a header.** Once `Idempotency-Key` is required, the Phase 3 API tests would get 400 on every deposit and transfer, so their `postJson` helper now sends a fresh key on each call.
 - **A test that only checks the count can pass without any overlap.** A 20-thread test finishes in about 0.1 seconds, so it is not certain that duplicates were ever blocked. One test therefore holds the first transaction open and looks in `pg_stat_activity` for the duplicate's INSERT waiting on a transaction id.
 - **JSONB is not byte-identical.** Compare replayed and original responses as parsed JSON.
+
+## Phase 6: the pieces used for the first time
+
+- **`spring-boot-starter-security` locks everything by default.** Adding the dependency alone makes every URL demand a login and prints a random password in the log. `SecurityConfig` replaces that with a `SecurityFilterChain` bean (the Security 6 way; `WebSecurityConfigurerAdapter` and `antMatchers` no longer exist). `UserDetailsServiceAutoConfiguration` is excluded in application.yml so the random default user is never created.
+- **The filter chain.** Every HTTP request passes through an ordered list of filters before reaching a controller. `JwtAuthenticationFilter` is inserted into that list with `addFilterBefore(...)`. It extends `OncePerRequestFilter`, which guarantees one run per request. It is created by `new` in `SecurityConfig` and is NOT a `@Component`: Spring Boot registers every `Filter` bean as a servlet filter on its own, so the filter would run twice.
+- **Security errors are not seen by `ApiExceptionHandler`.** The chain runs before Spring MVC, so 401 and 403 responses are written by hand in `ProblemJsonSecurityHandlers` (an `AuthenticationEntryPoint` for 401 and an `AccessDeniedHandler` for 403), in the same problem+json shape.
+- **`SecurityContextHolder`.** A thread-local that holds "who is this request". The filter fills it, `CurrentUserProvider` reads it, and Spring clears it after the request. Services never touch it.
+- **`@ConfigurationProperties` on a record, with a secret.** `JwtProperties` is bound from `ledger.jwt.*`. The environment variable `LEDGER_JWT_SECRET` maps onto `ledger.jwt.secret` by Spring's relaxed binding (upper case, underscores for dots), so there is no `${...}` placeholder in application.yml and nothing to accidentally default.
+- **Records print all their fields in `toString()`.** A password or token in a record would appear in any log line that prints it. The records that hold secrets override `toString()`.
+- **`saveAndFlush` for a unique column.** Registration flushes the INSERT immediately so a duplicate-username violation surfaces inside the `try` and becomes a clean 409; without the flush it would appear later, at commit.
+- **`OutputCaptureExtension`.** A JUnit extension that captures what the application writes to the console during a test, used to assert that no password or token is ever logged.
+- **`ApplicationContextRunner` and `SpringApplicationBuilder`.** Two ways to start a Spring context inside a test and expect failure: the runner is fast and only loads the classes you list; the builder starts the real application (used to check the real startup error message).
+
+### How to try the API by hand
+
+```bash
+export LEDGER_JWT_SECRET="$(openssl rand -base64 48)"    # or any 32+ character text
+docker compose up --build -d --wait
+curl -s -X POST localhost:8080/api/auth/register -H 'Content-Type: application/json' -d '{"username":"alice","password":"correct-horse-battery"}'
+TOKEN=$(curl -s -X POST localhost:8080/api/auth/login -H 'Content-Type: application/json' -d '{"username":"alice","password":"correct-horse-battery"}' | sed 's/.*"accessToken":"\([^"]*\)".*/\1/')
+curl -s -X POST localhost:8080/api/accounts -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' -d '{"name":"Main"}'
+docker compose down -v
+```
+
+### Traps to know
+
+- **Adding Security breaks tests that assumed open URLs.** Two smoke tests expected 404 for an unknown path and for `/actuator/env`; an unauthenticated caller now gets 401 for every URL that is not explicitly open (including ones that do not exist), so those tests send a token to reach the 404, and a new test pins the 401.
+- **Tests use real tokens, not `@WithMockUser`.** `@WithMockUser` skips the filter, so it would never test token parsing, expiry or tampering. `AuthTestClient` registers and logs in through the real endpoints.
+- **The shared test clock and token lifetime.** Some idempotency tests move the shared test clock forward 25 hours; the test profile therefore uses a 2 day token lifetime so earlier tokens survive, and the expiry test moves the clock past whatever lifetime is configured.
+- **Spring's validation error for a short secret prints the secret.** See docs/INTERVIEW_PREP.md, entry 24.

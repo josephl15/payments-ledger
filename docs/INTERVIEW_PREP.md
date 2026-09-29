@@ -82,17 +82,15 @@ The HTTP edge is thin: `TransferController` maps JSON to a `TransferCommand` and
 - *How do you know the ledger balances if funding has no balance?* Sum every entry: it must be zero. The scoped version of that check is in `MoneyMovementIntegrationTest.mixedSequenceKeepsEveryInvariant`; whole-ledger reconciliation comes in Phase 4.
 - *What would you do for very high deposit volume?* Batch or shard the counter-side (several funding accounts), or write entries only and derive balances asynchronously.
 
-## 6. The stub acting user and why services take an `ActingUser` parameter
+## 6. Why services take an `ActingUser` parameter (a header stub until Phase 6)
 
-**Plain words.** Real login arrives in Phase 6. Until then the API reads the caller's id from an `X-Acting-User-Id` header (a marked `TODO`, trivially spoofable, deleted in Phase 6). Services never look at a security context; they receive an `ActingUser` record.
+**Plain words.** Services never look at a security context; they receive an `ActingUser` record (just a user id). Until Phase 6 a header stub built it; now `CurrentUserProvider` builds it from the verified JWT (entry 20). The services did not change when the stub was replaced, which is the point of the design.
 
 **Why here.** Business rules (who owns which account) stay the same when authentication changes; only the code that builds `ActingUser` changes. It also makes services trivially testable: pass a value, no security setup.
 
-**Trade-off.** Nothing before Phase 6 is secured, and the README says so.
-
 **Likely questions**
 - *Why not read `SecurityContextHolder` in the service?* It couples business logic to the web layer and to a thread-local, and makes tests need a security context.
-- *Why return 404, not 403, for someone else's account?* It does not reveal that the id exists.
+- *Why return 404, not 403, for someone else's account?* It does not reveal that the id exists (entry 23).
 
 ---
 
@@ -290,3 +288,99 @@ The story to tell: idempotency is a decorator around the business transaction, s
 
 **Likely questions**
 - *What are the limitations of your approach?* Duplicates hold a connection while they wait; the 5 second lock timeout bounds the wait; failures are not remembered; expired rows are not cleaned up; it is tested on one database, not across several application instances (which the database constraint would still handle correctly).
+
+---
+
+## Walkthrough: the four files that matter for authentication (Phase 6)
+
+Open them in this order; together they are the whole story of a login and of an authenticated request.
+
+1. `src/main/java/dev/joseph/ledger/service/AuthService.java` registers a user (BCrypt hash, unique username, stored lower-case) and checks a password. It does not know about tokens.
+2. `src/main/java/dev/joseph/ledger/security/JwtService.java` creates a signed token (`issue`) and checks one (`parse`). Time comes from the injected `Clock`. `parse` returns "empty" for every kind of bad token, so the reason never reaches the client.
+3. `src/main/java/dev/joseph/ledger/security/JwtAuthenticationFilter.java` runs on every request: it reads `Authorization: Bearer ...` and, if the token is valid, records the user in the security context. `SecurityConfig.java` (same package) holds the rules: only `/api/auth/**` and `/actuator/health` are open, sessions are stateless, CSRF is off. `CurrentUserProvider.java` turns the context into an `ActingUser` for the controllers.
+4. `src/test/java/dev/joseph/ledger/AuthApiIntegrationTest.java` is the proof: real registered users with real tokens, then expired, tampered, unsigned, wrong-key and missing tokens, and one user reaching for another user's account.
+
+---
+
+## 20. How JWT authentication works, step by step
+
+**Plain words.**
+1. `POST /api/auth/register` stores the username and a BCrypt hash of the password.
+2. `POST /api/auth/login` checks the password and returns a token: three base64 pieces `header.payload.signature`. The payload holds the user id (`sub`), the role, the issue time (`iat`) and the expiry (`exp`). The signature is an HMAC-SHA-256 of the first two pieces, made with a secret key that only the server knows.
+3. The client sends `Authorization: Bearer <token>` on every later request.
+4. `JwtAuthenticationFilter` verifies the signature and expiry. If valid it stores the user in the security context, and controllers ask `CurrentUserProvider` who is calling. If not valid it stores nothing, and the rule "everything else needs authentication" answers 401.
+
+Anyone can read a token (it is only encoded, not encrypted) but nobody without the secret can change it or make one: change one character and the signature no longer matches.
+
+**Why here.** The server keeps no session, so any number of instances can serve any request. jjwt is used with one small hand-written filter so every step is visible in about 60 lines.
+
+**Trade-off.** A token cannot be taken back before it expires (no logout, no revocation), so the lifetime is short (default 1 hour, `ledger.jwt.ttl`). Putting the role in the token means a role change only shows up after the next login.
+
+**Likely questions**
+- *Is a JWT encrypted?* No. It is signed, so it cannot be altered, but its contents are readable; never put secrets in it.
+- *What stops someone changing `sub` to another user id?* The signature covers the payload. The test `aTokenWithAChangedSignatureOrPayloadIsRefused` does exactly this and gets 401.
+- *What is the `alg: none` attack?* A forged token that claims it needs no signature. jjwt refuses unsigned tokens when a verification key is set, and `aTokenSignedWithAnotherKeyOrNotSignedAtAllIsRefused` checks it.
+- *How does the server know a token has expired?* It compares `exp` with its `Clock`; the test moves the clock instead of sleeping.
+
+## 21. Why BCrypt
+
+**Plain words.** A password is never stored, only a hash. BCrypt is a hash designed to be slow (cost 10 means 2^10 rounds) and it adds a random salt to every hash, stored inside the result (`$2a$10$<salt><hash>`, 60 characters). The same password gives a different hash every time, and someone who steals the table has to guess passwords one slow attempt at a time.
+
+**Why here.** It is what the brief asks for and what Spring Security ships. The plain `BCryptPasswordEncoder` is used (not the delegating encoder) so the stored value has no `{bcrypt}` prefix to explain. Tests read the column and check it is BCrypt and not the plaintext, and that two users with the same password have different hashes.
+
+**Trade-off.** Slowness is the feature, but it costs CPU on every login (roughly 100 ms), so a flood of logins is a denial-of-service risk; production would add rate limiting. BCrypt only reads the first 72 bytes of a password, so longer passwords are rejected instead of being silently cut. Newer options (Argon2, scrypt) are harder to attack with GPUs.
+
+**Likely questions**
+- *Why not SHA-256?* It is fast, so an attacker can try billions of guesses a second. Password hashing must be slow.
+- *What is a salt?* Random data mixed into each hash so equal passwords differ and precomputed tables (rainbow tables) are useless.
+- *How do you stop attackers learning which usernames exist?* A wrong password and an unknown username return the identical 401, and an unknown username still does one BCrypt comparison against a dummy hash so it is not measurably faster. Registration does reveal a taken name (409); that is hard to avoid.
+
+## 22. Why stateless sessions and CSRF switched off
+
+**Plain words.** "Stateless" means the server remembers nothing between requests; the token is the proof each time. CSRF (cross-site request forgery) is an attack where a malicious web page makes your browser send a request to another site, and the browser attaches your login cookie automatically. This API uses no cookie: the client has to add the `Authorization` header by hand, which a hostile page in another tab cannot do. With nothing automatic to abuse, CSRF protection has nothing to protect and would only reject legitimate POSTs.
+
+**Why here.** Spring Security turns CSRF protection on by default, so it is disabled explicitly in `SecurityConfig` with a comment. The same file turns off form login and basic auth, and the auto-created default user (`UserDetailsServiceAutoConfiguration`) is excluded in `application.yml`, so there is no second way in.
+
+**Trade-off.** If the token were later kept in a cookie, CSRF protection would have to come back. A token kept in browser-readable storage can be stolen by cross-site scripting (XSS); this API has no browser front end.
+
+**Likely questions**
+- *When is CSRF protection needed?* When authentication is sent automatically by the browser (cookies, basic auth).
+- *Is disabling CSRF safe?* Only because of the point above; it depends on how the credential is carried.
+
+## 23. 401 versus 403 versus 404
+
+**Plain words.** 401: "I do not know who you are" (no token, bad token, expired token, wrong login). 403: "I know who you are, and you may not do this". 404: "there is nothing here for you". For another user's account this project answers 404, the same answer as for an id that does not exist.
+
+**Why here.** A 403 would confirm that the account exists; with 404 an attacker cannot use the API to discover which account ids are real. The rule lives in the services (`AccountService.get` filters by owner; `DepositService` and `TransferService` run the ownership query first), so it holds whichever controller calls them. `aUserCannotReadListDepositToOrTransferFromAnotherUsersAccount` checks read, list, deposit and transfer, checks the 404 body matches the one for an unknown id, and checks nothing moved. Sending money TO someone else's account is allowed: that is what a payment is.
+
+**Trade-off.** A genuine "you lack permission" looks the same as "does not exist", which makes support a little harder. A 403 handler (`ProblemJsonSecurityHandlers`) is wired, but nothing returns 403 yet because this build has no role-restricted URLs.
+
+**Likely questions**
+- *Why not 403?* It leaks existence. Many APIs (GitHub for private repositories) return 404 for the same reason.
+- *Does the 404 hide the id space completely?* Ids are random UUIDs, so guessing is impractical anyway; this is a second layer.
+
+## 24. Where the JWT secret lives, and why not in git
+
+**Plain words.** The signing key is the whole security of the tokens: anyone who has it can create a valid token for any user. So it is read only from the environment variable `LEDGER_JWT_SECRET`. There is no default in `application.yml`, in code or in `docker-compose.yml`; `.env.example` (committed) holds only a fake placeholder that is deliberately too short to work, and the real `.env` is git-ignored. Compose refuses to start if the variable is unset (`${LEDGER_JWT_SECRET:?...}`).
+
+**Why here.** If a default existed, every deployment that forgot to set one would run with a key published on GitHub. Instead the app fails at startup if the secret is missing or shorter than 32 characters (`JwtProperties`, `JwtSecretFailFastTest`). The tests use a separate fake key from `application-test.yml`.
+
+**A bug this design caught.** Spring's own validation message for a too-short value prints the rejected value, so a 31-character real secret would have been written to the startup log. The test `theRealApplicationFailsToStartWithAShortSecretAndDoesNotPrintItInTheError` showed it, and the check now lives in the record constructor with a message that does not contain the value. `JwtProperties.toString()` is overridden too, and so are the request records that hold passwords, so a stray log line cannot leak them.
+
+**Trade-off.** Environment variables are visible to anyone who can read the process environment; production would use a secrets manager (AWS Secrets Manager, Azure Key Vault) and rotate the key.
+
+**Likely questions**
+- *What if the secret leaks?* Change it: every existing token becomes invalid and everyone logs in again. Supporting two keys at once (a key id in the token header) allows rotation without logging everyone out.
+- *Why HS256 and not RS256?* One service both signs and verifies, so a shared secret is enough. If other services had to verify tokens, an asymmetric key pair would avoid sharing the signing key.
+
+## 25. What I would add for production
+
+- Refresh tokens and a short access-token lifetime, with a revocation list or a token version stored on the user so logout and "password changed" really end old tokens.
+- Rate limiting and lockout on login and register (BCrypt is deliberately expensive), and a password-strength check beyond length.
+- Move the secret to a secrets manager and rotate it (key id in the token header).
+- Email verification and password reset, and an audit log of logins and denied access (out of scope here).
+- HTTPS in front of the app: a bearer token sent over plain HTTP can be read by anyone on the path.
+
+**Likely questions**
+- *What are the weaknesses of your login?* No rate limiting, no revocation before expiry, registration reveals taken usernames, role changes wait for the next login.
+- *What happens to a stolen token?* It works until it expires; the short lifetime limits the damage.

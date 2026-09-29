@@ -330,3 +330,53 @@ Source: docs/evidence/phase-5-test-output.txt and build/test-results/test/*.xml.
 - No bug in the idempotency code: the new tests passed the first time they ran.
 - Test infrastructure: the first full-suite run failed 13 `LedgerApiIntegrationTest` tests because their Spring context could not open a database connection at startup after the idempotency tests added another cached context (diagnosed as connection slot exhaustion on the 100-connection container; the error text was not captured). Fixed in `6278ade` with `minimum-idle: 2` and `idle-timeout: 10000` in the test profile; the next full run passed.
 - The mutation check above is evidence that the concurrency test can fail.
+
+## Phase 6: Authentication and ownership
+
+### Run details
+
+Date: 2026-09-29
+Commits (in order): `b1fc73b` register/login, BCrypt, JWT filter, ownership through the token, stub and seeder deleted, existing tests moved to real tokens; `1100027` the new auth and fail-fast tests. The full suite below ran on the working tree whose `src/` is identical to `1100027` (only documentation and evidence files were added afterwards).
+
+Commands run for this entry (Git Bash, Windows 11, `JAVA_HOME` set to the JDK 21 install, Docker CLI on PATH, real PostgreSQL 16.15 through Testcontainers):
+
+- `./gradlew test --tests ...` on the new classes during development
+- `./gradlew cleanTest build --console=plain` for the full suite (docs/evidence/phase-6-test-output.txt), then a script summing `tests`, `skipped`, `failures` and `errors` from every `build/test-results/test/*.xml`, grouped by class-name suffix
+- a Docker Compose smoke test with a throwaway secret (docs/evidence/phase-6-compose-smoke.txt): Compose refuses to start without `LEDGER_JWT_SECRET`; with it, `docker compose up --build -d --wait` gave both containers healthy, and curl showed 401 without a token, register 201, login 200, open account 201 with the token, health 200, and 0 log lines containing the password, the token or the secret. `docker compose down -v` was run afterwards.
+
+### Test results (full suite, `cleanTest build`, exit code 0)
+
+Integration tests (*IntegrationTest): 171 run, 1 skipped, 0 failed, 0 errors
+Unit tests (*Test): 17 run, 0 skipped, 0 failed, 0 errors
+Total: 188 tests, 1 skipped (`LockingOffDemoIntegrationTest`, `@Disabled` on purpose), 0 failed, 0 errors
+
+Source: docs/evidence/phase-6-test-output.txt and build/test-results/test/*.xml. Phase 5 ended at 162; Phase 6 added 26: 20 in `AuthApiIntegrationTest`, 6 in `JwtSecretFailFastTest` (counted as a unit test by its class-name suffix, although it also boots the real application against the test database), 1 new in `ToolchainSmokeIntegrationTest`; minus the deleted `DevStubUserSeederIntegrationTest` (1). The other tests keep their count; `LedgerApiIntegrationTest` (13) and the idempotency classes now authenticate with real registered users.
+
+| Class | Tests | What it proves |
+|-------|-------|----------------|
+| `AuthApiIntegrationTest` | 20 | register returns id, username and role and never a password or hash; the stored value is a 60-character BCrypt hash (cost 10, not plaintext, the same password gives different hashes); duplicate username (also in another letter case) is 409; 8 simultaneous registrations of one name give exactly one 201 and seven 409; weak or malformed input is 400 and never echoes the password (short, bad characters, 73 characters, 40 two-byte characters = 80 bytes); login returns a token whose subject is the user id; wrong password and unknown user give identical 401 bodies; missing, non-Bearer and garbage tokens give 401 problem+json with `WWW-Authenticate: Bearer` on six protected requests including an unknown path; `/actuator/health` and `/api/auth/**` are open while `/actuator/env` is not; a token works one minute before expiry and fails one minute after (controllable clock); a changed signature, a swapped payload subject, a token signed with another key and an unsigned (`alg: none`) token are all 401; user A gets 404 reading, depositing into and transferring out of user B's account, the 404 body matches the one for an unknown id, list shows only own accounts, balances are unchanged, and A can still transfer INTO B's account; no password or token appears in the captured console log or in any error body; records holding a password or token do not print it |
+| `JwtSecretFailFastTest` | 6 | properties context fails for a missing secret and for a 31-character secret and accepts 32; the real application fails to start with a short secret and with an empty one, the error names `ledger.jwt` and does not contain the secret; the same boot code with a valid secret starts (control) |
+| `LedgerApiIntegrationTest` | 13 | unchanged behaviour tested with real tokens; the header tests became "missing or malformed token is 401" and "a valid token for a user who does not exist cannot open an account (404)" |
+| `ToolchainSmokeIntegrationTest` | 11 | now also pins 401 problem+json for an unauthenticated unknown path; the unknown-path 404 and the `/actuator/env` 404 are checked with a token |
+
+### Completed
+
+- AUTH-01: registration with BCrypt-hashed password (column checked in a test); usernames unique by database constraint.
+- AUTH-02: login returns an HS256 JWT signed with a key from `LEDGER_JWT_SECRET`, 32 or more characters, no default, startup fails otherwise (tests above), `.env.example` holds a fake placeholder, `.env` is git-ignored, Compose passes the variable through and refuses to start without it.
+- AUTH-03: every endpoint except `/api/auth/**` and `GET /actuator/health` needs a valid token; missing, invalid, expired, tampered, unsigned and wrong-key tokens give 401 problem+json.
+- AUTH-04: another user's account is 404 for read, deposit and transfer-from; list shows only own accounts.
+- AUTH-07: `StubActingUser`, the `X-Acting-User-Id` header and `DevStubUserSeeder` are deleted; `grep` for them in `src/` finds nothing.
+
+### Not completed
+
+- AUTH-05 and AUTH-06 (transaction view and admin-only endpoints) and the audit log are outside the lean scope and not built; no URL returns 403, although the 403 handler is wired.
+- No refresh tokens, revocation, logout, rate limiting or login lockout; a token is valid until it expires (default 1 hour). A role change only takes effect after the next login.
+- Registration reveals that a username is taken (409).
+- Nothing has run on GitHub Actions (no remote repository exists). Not load-tested; a login costs one BCrypt comparison.
+
+### Bugs caught
+
+- Secret leak in the startup error, caught by `theRealApplicationFailsToStartWithAShortSecretAndDoesNotPrintItInTheError` before the first commit: with only `@Size(min = 32)` on the property, Spring's failure message contains `rejected value [<the secret>]`, so a real 31-character secret would have been printed to the log. Fixed in `b1fc73b` by checking the length in the record constructor with a message that contains no value.
+- Two `ToolchainSmokeIntegrationTest` tests failed on the first full run (`unknownPathReturnsProblemJson`, `onlyHealthEndpointIsExposed`) because an unauthenticated caller now gets 401 instead of 404 for unknown and unexposed paths. That is the intended new behaviour, so the tests were changed to send a token (and a new test pins the 401); the suite then passed.
+- Test harness: the first version of the fail-fast test passed settings as default properties, which application.yml overrides, so it connected to the wrong database; a control test with a valid secret exposed it, and the settings are now passed as command-line arguments.
+

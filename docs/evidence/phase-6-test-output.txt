@@ -1,0 +1,422 @@
+> Task :cleanTest
+> Task :compileJava UP-TO-DATE
+> Task :processResources UP-TO-DATE
+> Task :classes UP-TO-DATE
+> Task :resolveMainClassName UP-TO-DATE
+> Task :bootJar UP-TO-DATE
+> Task :jar UP-TO-DATE
+> Task :assemble UP-TO-DATE
+> Task :compileTestJava
+> Task :processTestResources UP-TO-DATE
+> Task :testClasses
+OpenJDK 64-Bit Server VM warning: Sharing is only supported for boot loader classes because bootstrap classpath has been appended
+
+> Task :test
+
+AccountLockServiceIntegrationTest > aSecondTransactionWaitsForTheFirstAndThenSeesItsCommittedBalance() PASSED
+
+AccountLockServiceIntegrationTest > accountsComeBackInPostgresIdOrderNotJavaOrder() PASSED
+
+AccountLockServiceIntegrationTest > aMissingSystemOrEmptyRequestIsNotFound() PASSED
+
+AccountLockServiceIntegrationTest > aLockedRowIsReallyLockedFromOtherSessionsUntilTheTransactionEnds() PASSED
+
+AccountLockServiceIntegrationTest > theEmittedStatementIsOneSelectForUpdateOrderedByIdOnCustomerAccounts() PASSED
+
+AccountLockServiceIntegrationTest > lockingOutsideATransactionFailsLoudly() PASSED
+
+AtomicityIntegrationTest > depositThatFailsAfterTheFlushLeavesNoEntriesAndNoBalanceChange() PASSED
+
+AtomicityIntegrationTest > transferThatFailsAfterTheFlushLeavesNoEntriesAndNoBalanceChange() PASSED
+
+AuthApiIntegrationTest > protectedEndpointsRefuseARequestWithoutATokenWith401ProblemJson() PASSED
+
+AuthApiIntegrationTest > anAuthorizationHeaderThatIsNotABearerTokenIsRefused() PASSED
+
+AuthApiIntegrationTest > weakOrMalformedInputIsRejectedWith400AndNeverEchoesThePassword() PASSED
+
+AuthApiIntegrationTest > aWrongPasswordAndAnUnknownUsernameGiveTheIdenticalResponse() PASSED
+
+AuthApiIntegrationTest > aTokenSignedWithAnotherKeyOrNotSignedAtAllIsRefused() PASSED
+
+AuthApiIntegrationTest > aValidTokenOpensProtectedEndpoints() PASSED
+
+AuthApiIntegrationTest > recordsThatHoldSecretsDoNotPrintThem() PASSED
+
+AuthApiIntegrationTest > thePasswordIsStoredAsABcryptHashNeverAsPlaintext() PASSED
+
+AuthApiIntegrationTest > registerCreatesAUserAndNeverReturnsAPasswordOrHash() PASSED
+
+AuthApiIntegrationTest > aTokenWithAChangedSignatureOrPayloadIsRefused() PASSED
+
+AuthApiIntegrationTest > anExpiredTokenIsRefusedOnceTheClockPassesItsExpiry() PASSED
+
+AuthApiIntegrationTest > noPasswordOrTokenAppearsInTheLogOrInAnyErrorBody(CapturedOutput) PASSED
+
+AuthApiIntegrationTest > otherActuatorEndpointsStayClosed() PASSED
+
+AuthApiIntegrationTest > loginReturnsATokenForTheRegisteredUser() PASSED
+
+AuthApiIntegrationTest > manySimultaneousRegistrationsOfOneUsernameCreateExactlyOneUser() PASSED
+
+AuthApiIntegrationTest > twoUsersWithTheSamePasswordGetDifferentHashesBecauseOfTheSalt() PASSED
+
+AuthApiIntegrationTest > aDuplicateUsernameIsRejectedWith409EvenInADifferentCase() PASSED
+
+AuthApiIntegrationTest > healthAndAuthEndpointsNeedNoToken() PASSED
+
+AuthApiIntegrationTest > aUserCannotReadListDepositToOrTransferFromAnotherUsersAccount() PASSED
+
+AuthApiIntegrationTest > loginWithMissingFieldsIsBadRequest() PASSED
+
+ConcurrentIdempotencyIntegrationTest > aDuplicateArrivingWhileTheFirstTransactionIsOpenWaitsThenReplaysItsResult() PASSED
+
+ConcurrentIdempotencyIntegrationTest > twentyConcurrentIdenticalRequestsThatFailAllFailCleanlyAndLeaveNothingBehind() PASSED
+
+ConcurrentIdempotencyIntegrationTest > oneKeyWithTwentyDifferentBodiesLetsExactlyOneWinAndRefusesTheRest() PASSED
+
+ConcurrentIdempotencyIntegrationTest > twentyConcurrentIdenticalTransfersCreateExactlyOneTransaction() PASSED
+
+ConcurrentIdempotencyIntegrationTest > twentyConcurrentIdenticalDepositsCreateExactlyOneTransaction() PASSED
+
+ConcurrentIdempotencyIntegrationTest > controlTwentyConcurrentTransfersWithDifferentKeysAllExecute() PASSED
+
+ConcurrentTransferShowcaseIntegrationTest > thousandConcurrentRandomTransfersKeepEveryInvariant() PASSED
+
+DeadlockIntegrationTest > oppositeTransfersBetweenTwoAccountsAllCompleteWithoutDeadlock() PASSED
+
+DeadlockMutationIntegrationTest > lockingInAlternatingOrderProducesDeadlocksAndTheLedgerStillReconciles() PASSED
+
+EntityMappingIntegrationTest > customerAccountRoundTripsAndBalanceChangeIsSaved() PASSED
+
+EntityMappingIntegrationTest > auditEntryRoundTripsWithStructuredDetails() PASSED
+
+EntityMappingIntegrationTest > auditEntryWithNoUserOrDetailsRoundTrips() PASSED
+
+EntityMappingIntegrationTest > reversalTransactionRoundTripsAndSecondReversalIsBlockedAndDetected() PASSED
+
+EntityMappingIntegrationTest > seededSystemAccountsLoadWithNullBalanceAndTheConstantsMatchTheDatabase() PASSED
+
+EntityMappingIntegrationTest > systemAccountRefusesABalanceChange() PASSED
+
+EntityMappingIntegrationTest > immutableEntryIsNeverUpdatedByHibernate() PASSED
+
+EntityMappingIntegrationTest > transactionAndEntriesRoundTripWithGeneratedIds() PASSED
+
+EntityMappingIntegrationTest > userRoundTrips() PASSED
+
+EntityMappingIntegrationTest > duplicateIdempotencyKeyIsRejectedWithTheConstraintName() PASSED
+
+EntityMappingIntegrationTest > idempotencyKeyRoundTripsWithJsonBodyStoredAsAnObject() PASSED
+
+IdempotencyApiIntegrationTest > reorderedJsonFieldsWithTheSameKeyAreTheSameRequest() PASSED
+
+IdempotencyApiIntegrationTest > blankOversizedAndBadCharsetKeysAreBadRequests() PASSED
+
+IdempotencyApiIntegrationTest > aKeyOfExactlyTheMaximumLengthIsAccepted() PASSED
+
+IdempotencyApiIntegrationTest > anUnknownAccountLeavesNoKeyRowEither() PASSED
+
+IdempotencyApiIntegrationTest > sameKeyOnAnotherEndpointIsUnprocessableAndNeverReplaysTheOtherResponse() PASSED
+
+IdempotencyApiIntegrationTest > aMissingHeaderIsBadRequestOnBothEndpointsAndMovesNothing() PASSED
+
+IdempotencyApiIntegrationTest > transferRetryWithSameKeyAndBodyMovesMoneyOnce() PASSED
+
+IdempotencyApiIntegrationTest > theKeyRowStoresHashStatusBodyTransactionAndTheConfiguredExpiry() PASSED
+
+IdempotencyApiIntegrationTest > depositRetryWithSameKeyAndBodyExecutesOnceAndReturnsTheStoredResponse() PASSED
+
+IdempotencyApiIntegrationTest > sameKeyWithADifferentBodyIsUnprocessableAndMovesNothing() PASSED
+
+IdempotencyApiIntegrationTest > aFailedFirstAttemptIsNotRememberedSoARetryRunsAgain() PASSED
+
+IdempotencyApiIntegrationTest > differentUsersMayUseTheSameKeyText() PASSED
+
+IdempotencyExpiryIntegrationTest > anExpiredKeyMayBeReusedForADifferentRequest() PASSED
+
+IdempotencyExpiryIntegrationTest > anExpiredKeyCanBeReusedAndExecutesAgain() PASSED
+
+IdempotencyExpiryIntegrationTest > aKeyStillWithinItsTtlIsReplayed() PASSED
+
+IdempotencyServiceIntegrationTest > secondBeginForTheSameKeyThrowsDuplicateFromTheBeginCallItself() PASSED
+
+IdempotencyServiceIntegrationTest > beginAndCompleteRefuseToRunWithoutATransaction() PASSED
+
+IdempotencyServiceIntegrationTest > replayTreatsAnExpiredRowAsAbsent() PASSED
+
+IdempotencyServiceIntegrationTest > aForeignKeyViolationInsideBeginIsRethrownNotTreatedAsAReplay() PASSED
+
+IdempotencyServiceIntegrationTest > replayInsideAnUnexpiredKeyReturnsTheStoredResponseAndAWrongHashIsRefused() PASSED
+
+IdempotencyServiceIntegrationTest > aViolationOfADifferentUniqueConstraintIsNotMistakenForADuplicateKey() PASSED
+
+IdempotencyServiceIntegrationTest > aDuplicateAcrossTransactionsIsRecognisedByTheNamedConstraint() PASSED
+
+IdempotencyServiceIntegrationTest > theExecutorRefusesToRunInsideAnotherTransaction() PASSED
+
+ImmutabilityTriggerIntegrationTest > truncateOfTheLedgerAndAuditTablesIsRejected() PASSED
+
+ImmutabilityTriggerIntegrationTest > updateOfALedgerEntryIsRejected() PASSED
+
+ImmutabilityTriggerIntegrationTest > ordinaryInsertsStillWork() PASSED
+
+ImmutabilityTriggerIntegrationTest > updateRejectionNamesTheOperationAndTable() PASSED
+
+ImmutabilityTriggerIntegrationTest > truncateCascadeFromEveryParentTableIsRejected() PASSED
+
+ImmutabilityTriggerIntegrationTest > deleteOfAnAuditRowIsRejected() PASSED
+
+ImmutabilityTriggerIntegrationTest > truncateOfSeveralTablesAtOnceIsRejected() PASSED
+
+ImmutabilityTriggerIntegrationTest > updateOfAnAuditRowIsRejected() PASSED
+
+ImmutabilityTriggerIntegrationTest > deleteOfALedgerEntryIsRejected() PASSED
+
+ImmutableRepositoryShapeTest > appendOnlyRepositoriesExposeNoDeleteOrRemoveMethod() PASSED
+
+ImmutableRepositoryShapeTest > noRepositoryExtendsJpaRepositoryOrCrudRepository() PASSED
+
+JwtSecretFailFastTest > theRealApplicationFailsToStartWithNoSecretAtAll() PASSED
+
+JwtSecretFailFastTest > aSecretOf32CharactersIsAcceptedAndTheDefaultLifetimeIsOneHour() PASSED
+
+JwtSecretFailFastTest > theRealApplicationStartsWithAValidSecret() PASSED
+
+JwtSecretFailFastTest > aSecretShorterThan32CharactersStopsTheContextFromStarting() PASSED
+
+JwtSecretFailFastTest > theRealApplicationFailsToStartWithAShortSecretAndDoesNotPrintItInTheError() PASSED
+
+JwtSecretFailFastTest > aMissingSecretStopsTheContextFromStarting() PASSED
+
+LedgerApiIntegrationTest > openingAnAccountValidatesTheName() PASSED
+
+LedgerApiIntegrationTest > aTokenForAUserWhoDoesNotExistCannotOpenAnAccount() PASSED
+
+LedgerApiIntegrationTest > depositThenTransferReturnsBalancedTransactionsAndUpdatesBalances() PASSED
+
+LedgerApiIntegrationTest > invalidAmountsAreRejectedWithProblemJson400() PASSED
+
+LedgerApiIntegrationTest > malformedBodiesAndBadFieldsAreBadRequests() PASSED
+
+LedgerApiIntegrationTest > closedAccountIsUnprocessable() PASSED
+
+LedgerApiIntegrationTest > validationErrorBodyListsFieldsButNeverEchoesValues() PASSED
+
+LedgerApiIntegrationTest > openListAndViewAccounts() PASSED
+
+LedgerApiIntegrationTest > missingOrMalformedTokenIsUnauthorized() PASSED
+
+LedgerApiIntegrationTest > insufficientFundsIsProblemJson422() PASSED
+
+LedgerApiIntegrationTest > transferFromSomeoneElsesAccountOrToAnUnknownAccountIsNotFound() PASSED
+
+LedgerApiIntegrationTest > anotherUsersAccountAndUnknownAccountAreBothNotFound() PASSED
+
+LedgerApiIntegrationTest > sameFromAndToIsBadRequest() PASSED
+
+LedgerConstraintsIntegrationTest > aTransactionCanBeReversedOnlyOnce() PASSED
+
+LedgerConstraintsIntegrationTest > entryForUnknownAccountIsRejected() PASSED
+
+LedgerConstraintsIntegrationTest > manyOrdinaryTransactionsAreAllowed() PASSED
+
+LedgerConstraintsIntegrationTest > accountOwnerMustExist() PASSED
+
+LedgerConstraintsIntegrationTest > sameUserCannotReuseAnIdempotencyKey() PASSED
+
+LedgerConstraintsIntegrationTest > reversalCannotPointAtItself() PASSED
+
+LedgerConstraintsIntegrationTest > auditRowsMayHaveNoUser() PASSED
+
+LedgerConstraintsIntegrationTest > lowercaseCurrencyIsRejected() PASSED
+
+LedgerConstraintsIntegrationTest > seededSystemAccountCannotBeGivenABalance() PASSED
+
+LedgerConstraintsIntegrationTest > zeroAmountEntryIsRejected() PASSED
+
+LedgerConstraintsIntegrationTest > customerMustHaveABalance() PASSED
+
+LedgerConstraintsIntegrationTest > unknownAuditOutcomeIsRejected() PASSED
+
+LedgerConstraintsIntegrationTest > differentUsersMayUseTheSameIdempotencyKey() PASSED
+
+LedgerConstraintsIntegrationTest > currencyLongerThanThreeCharactersIsRejected() PASSED
+
+LedgerConstraintsIntegrationTest > systemAccountMustNotHaveAnOwner() PASSED
+
+LedgerConstraintsIntegrationTest > entryForUnknownTransactionIsRejected() PASSED
+
+LedgerConstraintsIntegrationTest > unknownAccountStatusIsRejected() PASSED
+
+LedgerConstraintsIntegrationTest > entryIdCannotBeSuppliedByTheApplication() PASSED
+
+LedgerConstraintsIntegrationTest > customerAccountMustHaveAnOwner() PASSED
+
+LedgerConstraintsIntegrationTest > negativeAndPositiveEntriesAreAccepted() PASSED
+
+LedgerConstraintsIntegrationTest > customerBalanceCannotBeNegativeOnInsert() PASSED
+
+LedgerConstraintsIntegrationTest > unknownTransactionTypeIsRejected() PASSED
+
+LedgerConstraintsIntegrationTest > nonReversalMustNotPointAtATransaction() PASSED
+
+LedgerConstraintsIntegrationTest > reversalMustPointAtATransaction() PASSED
+
+LedgerConstraintsIntegrationTest > customerBalanceCannotBecomeNegativeOnUpdate() PASSED
+
+LedgerConstraintsIntegrationTest > entryCurrencyMustBeThreeCapitalLetters() PASSED
+
+LedgerConstraintsIntegrationTest > unknownUserRoleIsRejected() PASSED
+
+LedgerConstraintsIntegrationTest > systemAccountMustNotHaveABalance() PASSED
+
+LedgerConstraintsIntegrationTest > customerBalanceCanBeZero() PASSED
+
+LedgerConstraintsIntegrationTest > usernameMustBeUnique() PASSED
+
+LockingOffDemoIntegrationTest > thousandConcurrentRandomTransfersKeepEveryInvariant() SKIPPED
+
+MoneyMovementIntegrationTest > transferInvolvingAClosedAccountIsRejected() PASSED
+
+MoneyMovementIntegrationTest > mixedSequenceKeepsEveryInvariant() PASSED
+
+MoneyMovementIntegrationTest > openingAnAccountForAnUnknownUserIsNotFound() PASSED
+
+MoneyMovementIntegrationTest > depositIntoSomeoneElsesOrUnknownOrSystemAccountIsNotFoundAndWritesNothing() PASSED
+
+MoneyMovementIntegrationTest > depositRejectsBadAmountsAndCurrency() PASSED
+
+MoneyMovementIntegrationTest > transferWithInsufficientFundsIsRejectedAndWritesNothing() PASSED
+
+MoneyMovementIntegrationTest > transferRejectsBadAmountsAndCurrency() PASSED
+
+MoneyMovementIntegrationTest > depositWritesTwoBalancedEntriesAndRaisesTheCachedBalance() PASSED
+
+MoneyMovementIntegrationTest > transferBetweenDifferentCurrencyAccountsIsRejected() PASSED
+
+MoneyMovementIntegrationTest > depositIntoAClosedAccountIsRejected() PASSED
+
+MoneyMovementIntegrationTest > openedAccountIsActiveGbpWithZeroBalanceAndOwnedByTheActor() PASSED
+
+MoneyMovementIntegrationTest > transferOfTheWholeBalanceIsAllowedAndLeavesZero() PASSED
+
+MoneyMovementIntegrationTest > listReturnsOnlyTheActorsAccountsAndGetHidesOthers() PASSED
+
+MoneyMovementIntegrationTest > postingOutsideATransactionFailsLoudly() PASSED
+
+MoneyMovementIntegrationTest > transferFromAnAccountTheActorDoesNotOwnIsNotFound() PASSED
+
+MoneyMovementIntegrationTest > depositLeavesTheSystemAccountWithoutACachedBalance() PASSED
+
+MoneyMovementIntegrationTest > transferToAnUnknownOrSystemAccountIsNotFound() PASSED
+
+MoneyMovementIntegrationTest > transferBetweenTheSameAccountIsInvalid() PASSED
+
+MoneyMovementIntegrationTest > transferWritesTwoBalancedEntriesAndMovesTheCachedBalances() PASSED
+
+PostgresImageTagConsistencyTest > composeUsesTheSamePostgresImageAsTestcontainers() PASSED
+
+ReconciliationIntegrationTest > cleanDataWrittenByTheRealServicesReconcilesCleanAtRepeatableRead() PASSED
+
+ReconciliationIntegrationTest > theWholeLedgerFormRunsAtRepeatableReadAndSeesTheSharedDatabase() PASSED
+
+ReconciliationIntegrationTest > aNegativeBalanceDerivedFromTheEntriesIsDetectedEvenWhenTheCacheIsZero() PASSED
+
+ReconciliationIntegrationTest > anAccountWithNoEntriesAtAllButANonZeroCachedBalanceIsStillDetected() PASSED
+
+ReconciliationIntegrationTest > anUnbalancedTransactionAndAWrongCachedBalanceAreBothDetected() PASSED
+
+ReconciliationIntegrationTest > anEmptyScopeChecksNothingAndIsClean() PASSED
+
+RequestHasherTest > incomingJsonFieldOrderAndWhitespaceDoNotChangeTheHash() PASSED
+
+RequestHasherTest > anAbsentOptionalFieldAndAnExplicitNullAreTheSameRequest() PASSED
+
+RequestHasherTest > validKeysAreAccepted() PASSED
+
+RequestHasherTest > missingBlankOversizedAndBadCharsetKeysAreRejected() PASSED
+
+RequestHasherTest > anyRealDifferenceChangesTheHash() PASSED
+
+RequestHasherTest > hashIs64LowercaseHexCharactersAndStable() PASSED
+
+RequestHasherTest > canonicalFormIsMethodPathAndSortedJsonSeparatedByNewlines() PASSED
+
+RequestHasherTest > differentRequestTypesNeverShareAHash() PASSED
+
+SchemaMigrationIntegrationTest > namedConstraintsExist() PASSED
+
+SchemaMigrationIntegrationTest > sixLedgerTablesExist() PASSED
+
+SchemaMigrationIntegrationTest > flywayAppliedVersionsOneToFourSuccessfully() PASSED
+
+SchemaMigrationIntegrationTest > fourImmutabilityTriggersExist() PASSED
+
+SchemaMigrationIntegrationTest > historyAndReconciliationIndexesExist() PASSED
+
+SchemaMigrationIntegrationTest > systemAccountsAreSeededWithoutBalanceOrOwner() PASSED
+
+TestIsolationIntegrationTest > scopedTestTwoSameShapeIndependentOfTestOne() PASSED
+
+TestIsolationIntegrationTest > scopedTestOne() PASSED
+
+TestIsolationIntegrationTest > replicaRoleSwitchesTheTriggersOffOnlyInsideItsTransaction() PASSED
+
+TestIsolationIntegrationTest > replicaRoleStillEnforcesCheckConstraints() PASSED
+
+TestIsolationIntegrationTest > injectedCorruptionIsDetectedAndThenCleanedUp() PASSED
+
+ToolchainSmokeIntegrationTest > noH2OnClasspath() PASSED
+
+ToolchainSmokeIntegrationTest > flywayAppliedBaseline() PASSED
+
+ToolchainSmokeIntegrationTest > unknownPathReturnsProblemJson() PASSED
+
+ToolchainSmokeIntegrationTest > lockTimeoutFiresOnRealLockWait() PASSED
+
+ToolchainSmokeIntegrationTest > onlyHealthEndpointIsExposed() PASSED
+
+ToolchainSmokeIntegrationTest > lockTimeoutAppliedToPoolConnections() PASSED
+
+ToolchainSmokeIntegrationTest > configIsStrict() PASSED
+
+ToolchainSmokeIntegrationTest > healthIsUp() PASSED
+
+ToolchainSmokeIntegrationTest > anUnauthenticatedCallerGets401ProblemJsonEvenForAnUnknownPath() PASSED
+
+ToolchainSmokeIntegrationTest > hikariPoolIsExplicitForTests() PASSED
+
+ToolchainSmokeIntegrationTest > runsAgainstPostgres16() PASSED
+
+2026-09-29T23:07:08.680+01:00  INFO 42488 --- [ledger-service] [ionShutdownHook] o.s.b.w.e.tomcat.GracefulShutdown        : Commencing graceful shutdown. Waiting for active requests to complete
+2026-09-29T23:07:08.686+01:00  INFO 42488 --- [ledger-service] [tomcat-shutdown] o.s.b.w.e.tomcat.GracefulShutdown        : Graceful shutdown complete
+2026-09-29T23:07:08.687+01:00  INFO 42488 --- [ledger-service] [ionShutdownHook] j.LocalContainerEntityManagerFactoryBean : Closing JPA EntityManagerFactory for persistence unit 'default'
+2026-09-29T23:07:08.688+01:00  INFO 42488 --- [ledger-service] [ionShutdownHook] com.zaxxer.hikari.HikariDataSource       : HikariPool-1 - Shutdown initiated...
+2026-09-29T23:07:08.689+01:00  INFO 42488 --- [ledger-service] [ionShutdownHook] com.zaxxer.hikari.HikariDataSource       : HikariPool-1 - Shutdown completed.
+2026-09-29T23:07:08.690+01:00  INFO 42488 --- [ledger-service] [ionShutdownHook] o.s.b.w.e.tomcat.GracefulShutdown        : Commencing graceful shutdown. Waiting for active requests to complete
+2026-09-29T23:07:08.697+01:00  INFO 42488 --- [ledger-service] [tomcat-shutdown] o.s.b.w.e.tomcat.GracefulShutdown        : Graceful shutdown complete
+2026-09-29T23:07:08.698+01:00  INFO 42488 --- [ledger-service] [ionShutdownHook] j.LocalContainerEntityManagerFactoryBean : Closing JPA EntityManagerFactory for persistence unit 'default'
+2026-09-29T23:07:08.698+01:00  INFO 42488 --- [ledger-service] [ionShutdownHook] com.zaxxer.hikari.HikariDataSource       : HikariPool-2 - Shutdown initiated...
+2026-09-29T23:07:08.699+01:00  INFO 42488 --- [ledger-service] [ionShutdownHook] com.zaxxer.hikari.HikariDataSource       : HikariPool-2 - Shutdown completed.
+2026-09-29T23:07:08.701+01:00  INFO 42488 --- [ledger-service] [ionShutdownHook] o.s.b.w.e.tomcat.GracefulShutdown        : Commencing graceful shutdown. Waiting for active requests to complete
+2026-09-29T23:07:08.706+01:00  INFO 42488 --- [ledger-service] [tomcat-shutdown] o.s.b.w.e.tomcat.GracefulShutdown        : Graceful shutdown complete
+2026-09-29T23:07:08.708+01:00  INFO 42488 --- [ledger-service] [ionShutdownHook] j.LocalContainerEntityManagerFactoryBean : Closing JPA EntityManagerFactory for persistence unit 'default'
+2026-09-29T23:07:08.708+01:00  INFO 42488 --- [ledger-service] [ionShutdownHook] com.zaxxer.hikari.HikariDataSource       : HikariPool-3 - Shutdown initiated...
+2026-09-29T23:07:08.710+01:00  INFO 42488 --- [ledger-service] [ionShutdownHook] com.zaxxer.hikari.HikariDataSource       : HikariPool-3 - Shutdown completed.
+2026-09-29T23:07:08.711+01:00  INFO 42488 --- [ledger-service] [ionShutdownHook] o.s.b.w.e.tomcat.GracefulShutdown        : Commencing graceful shutdown. Waiting for active requests to complete
+2026-09-29T23:07:08.717+01:00  INFO 42488 --- [ledger-service] [tomcat-shutdown] o.s.b.w.e.tomcat.GracefulShutdown        : Graceful shutdown complete
+2026-09-29T23:07:08.719+01:00  INFO 42488 --- [ledger-service] [ionShutdownHook] j.LocalContainerEntityManagerFactoryBean : Closing JPA EntityManagerFactory for persistence unit 'default'
+2026-09-29T23:07:08.720+01:00  INFO 42488 --- [ledger-service] [ionShutdownHook] com.zaxxer.hikari.HikariDataSource       : HikariPool-4 - Shutdown initiated...
+2026-09-29T23:07:08.721+01:00  INFO 42488 --- [ledger-service] [ionShutdownHook] com.zaxxer.hikari.HikariDataSource       : HikariPool-4 - Shutdown completed.
+2026-09-29T23:07:08.723+01:00  INFO 42488 --- [ledger-service] [ionShutdownHook] o.s.b.w.e.tomcat.GracefulShutdown        : Commencing graceful shutdown. Waiting for active requests to complete
+2026-09-29T23:07:08.730+01:00  INFO 42488 --- [ledger-service] [tomcat-shutdown] o.s.b.w.e.tomcat.GracefulShutdown        : Graceful shutdown complete
+2026-09-29T23:07:08.732+01:00  INFO 42488 --- [ledger-service] [ionShutdownHook] j.LocalContainerEntityManagerFactoryBean : Closing JPA EntityManagerFactory for persistence unit 'default'
+2026-09-29T23:07:08.732+01:00  INFO 42488 --- [ledger-service] [ionShutdownHook] com.zaxxer.hikari.HikariDataSource       : HikariPool-8 - Shutdown initiated...
+2026-09-29T23:07:08.733+01:00  INFO 42488 --- [ledger-service] [ionShutdownHook] com.zaxxer.hikari.HikariDataSource       : HikariPool-8 - Shutdown completed.
+
+> Task :check
+> Task :build
+
+BUILD SUCCESSFUL in 54s
+9 actionable tasks: 3 executed, 6 up-to-date

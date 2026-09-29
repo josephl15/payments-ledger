@@ -1,0 +1,14 @@
+# Phase 6 compose smoke test (2026-09-29). Run with a throwaway LEDGER_JWT_SECRET set in the environment; accessToken value redacted.
+# 'docker compose config' with the variable unset fails with:
+error while interpolating services.app.environment.LEDGER_JWT_SECRET: required variable LEDGER_JWT_SECRET is missing a value: Set LEDGER_JWT_SECRET (32+ characters, see .env.example)
+# 'docker compose up --build -d --wait' with the variable set: exit 0, both containers Healthy. Then curl:
+no token accounts: 401
+{"id":"10159392-af94-492b-b2b5-6e58a0c93caf","username":"alice","role":"USER"}
+register: 201
+login body keys: {"accessToken":"<redacted>","tokenType":"Bearer","expiresInSeconds":3600}
+{"id":"014df125-0629-42e6-97b3-b77cab0ebfcb","name":"Main","currency":"GBP","status":"ACTIVE","balanceMinor":0,"createdAt":"2026-09-29T22:08:53.242731749Z"}
+open account: 201
+health: 200
+0
+0
+# (last two numbers: log lines containing the password, the token or the secret = 0; lines with a generated default password = 0)

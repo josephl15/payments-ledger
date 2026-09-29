@@ -366,7 +366,7 @@ A caller cannot tell "no such account" from "not yours", which makes debugging s
 
 ## 21. The acting user is a header stub with a dev-profile fixture
 
-**Phase:** 3 | **Date:** 2026-09-29 | **Status:** Accepted, removed in Phase 6
+**Phase:** 3 | **Date:** 2026-09-29 | **Status:** Superseded in Phase 6 (stub and fixture deleted; see entry 29)
 
 **Choice**
 Controllers read `X-Acting-User-Id`, build an `ActingUser` record (marked `TODO(Phase 6)`) and pass it to the services; no service reads a security context. The user must already exist in `users`. A real users row is created by `DevStubUserSeeder`, active only in the `dev` profile, and by test fixtures; no migration inserts a user, so nothing seeded ever reaches a real database.
@@ -472,3 +472,34 @@ Waiting duplicates hurt (return 409 "in progress" instead), or many more money e
 
 **Trade-off**
 No cleanup job, so expired rows stay until their key is reused (a scheduled delete is a small later addition). A 24 hour window means a retry after a longer outage is treated as new. Hashing the DTO means two bodies the server treats identically (for example a null and an omitted `reference`) are the same request, which is the intent.
+
+## 29. Authentication: jjwt with one hand-written filter, stateless, HS256, secret only from the environment
+
+**Phase:** 6 | **Date:** 2026-09-29 | **Status:** Accepted
+
+**Context**
+Every request must come from a known user, and the id the services act for must come from something the client cannot choose.
+
+**Options**
+- Spring Security session login (cookie): needs CSRF protection and server-side session state.
+- `spring-boot-starter-oauth2-resource-server` with Nimbus: less code to write, but more configuration to explain and built for an external token issuer.
+- jjwt plus a small `OncePerRequestFilter`: a few dozen lines, every step visible.
+
+**Choice**
+The third (as in research/STACK.md). `JwtService` signs HS256 tokens with subject = user id and a `role` claim, and verifies with the injected `Clock`. `JwtAuthenticationFilter` sets the security context or leaves it empty; the authorization rules then produce 401 (`ProblemJsonSecurityHandlers`, as `application/problem+json`). Only `/api/auth/**` and `GET /actuator/health` are open; sessions are stateless; CSRF, form login and basic auth are off. The filter is created inside `SecurityConfig` and is not a `@Component`, so it is not also registered as a plain servlet filter (double execution). `CurrentUserProvider` builds the `ActingUser` the services already took; the header stub, `StubActingUser` and `DevStubUserSeeder` are deleted. The secret is bound from `LEDGER_JWT_SECRET` into `JwtProperties` with no default anywhere; a missing or under-32-character value stops startup, with a message that does not contain the value (Spring's own validation message would). Passwords are BCrypt (cost 10, plain encoder, no prefix), usernames are case-insensitive and stored lower-case, passwords over 72 bytes are refused (BCrypt ignores the rest), and login answers wrong-password and unknown-user identically (401) after the same amount of BCrypt work. Duplicate usernames are 409, decided by the `uq_users_username` unique constraint (the exists-check only gives the friendly path; a concurrency test fires 8 registrations of one name and gets exactly one 201).
+
+**Trade-off**
+No revocation or refresh: a token is valid until it expires (default 1 hour), and the role in the token changes only at the next login. The registration response reveals that a username is taken. No rate limiting on login or register. An HMAC secret shared by signer and verifier is fine for one service.
+
+**Revisit if**
+Another service must verify tokens (switch to an asymmetric key or a resource server), users need logout, or the API is exposed to the internet (rate limiting, refresh tokens, HTTPS).
+
+## 30. Another user's account is a 404, enforced in the services
+
+**Phase:** 6 | **Date:** 2026-09-29 | **Status:** Accepted (the rule dates from Phase 3, decision 20; Phase 6 makes it real and tests it with real tokens)
+
+**Choice**
+A logged-in user asking for someone else's account, or depositing into it, or transferring out of it, gets the same 404 problem+json as for an id that does not exist. A transfer INTO another user's account is allowed. The checks stay in `AccountService`, `DepositService` and `TransferService` (not in the controllers or in URL rules), so they hold for any caller of the services. No URL returns 403 in this build; the 403 handler exists for when role-restricted URLs (an admin area) are added, which the lean scope leaves out.
+
+**Trade-off**
+"Not allowed" and "does not exist" look the same to the client, which slightly hinders debugging.
