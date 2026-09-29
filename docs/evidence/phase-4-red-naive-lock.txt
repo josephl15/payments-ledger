@@ -1,0 +1,54 @@
+Phase 4 RED run: concurrency showcase against the NAIVE AccountLockService (plain read, no row lock)
+Commit under test: e0e87fa (tree clean, main code identical to the Phase 3 lock body)
+Command: ./gradlew cleanTest test --tests '*ConcurrentTransferShowcaseIntegrationTest' --console=plain
+Parameters: seed=20260929, accounts=10, initial balance=10000 pence each, transfers=1000, threads=16, amounts 1..5000 pence
+
+---- Gradle console output ----
+> Task :cleanTest
+> Task :compileJava UP-TO-DATE
+> Task :processResources UP-TO-DATE
+> Task :classes UP-TO-DATE
+> Task :compileTestJava UP-TO-DATE
+> Task :processTestResources UP-TO-DATE
+> Task :testClasses UP-TO-DATE
+OpenJDK 64-Bit Server VM warning: Sharing is only supported for boot loader classes because bootstrap classpath has been appended
+
+> Task :test
+
+ConcurrentTransferShowcaseIntegrationTest > thousandConcurrentRandomTransfersKeepEveryInvariant() FAILED
+    org.assertj.core.error.AssertJMultipleFailuresError at ConcurrentTransferShowcaseIntegrationTest.java:108
+
+
+> Task :test FAILED
+
+1 test completed, 1 failed
+
+FAILURE: Build failed with an exception.
+
+* What went wrong:
+Execution failed for task ':test'.
+> There were failing tests. See the report at: file:///C:/Users/Joseph/Desktop/Payment%20Ledger%20personal%20project/build/reports/tests/test/index.html
+
+* Try:
+> Run with --scan to get full insights.
+
+BUILD FAILED in 14s
+6 actionable tasks: 2 executed, 4 up-to-date
+---- from build/test-results (system-out lines printed by the test) ----
+SHOWCASE OUTCOME (seed=20260929, accounts=10, transfers=1000, threads=16): success=894, insufficientFunds=106, otherFailures={}, elapsedMillis=970
+SHOWCASE RECONCILIATION: isolation=repeatable read, transactions=904, accounts=10, unbalancedTransactions=[], entrySum=0, balanceMismatches=[BalanceMismatch[accountId=20209d07-8f9d-4b7b-a63e-3238c511b8d9, cachedBalance=14973, ledgerBalance=542], BalanceMismatch[accountId=331038a2-b487-464a-901e-8ee7db7fad1d, cachedBalance=1337, ledgerBalance=15492], BalanceMismatch[accountId=3b816f45-4a63-4cf9-80ee-71997c6ec315, cachedBalance=4779, ledgerBalance=13043], BalanceMismatch[accountId=42ec5779-ff2a-42c3-b7ec-fef09e36b000, cachedBalance=1100, ledgerBalance=25373], BalanceMismatch[accountId=633b14e7-c45e-4016-a21f-e8c1a1493d8a, cachedBalance=38310, ledgerBalance=8594], BalanceMismatch[accountId=820b6b6d-cbc2-48fb-b774-eba5592ac074, cachedBalance=4956, ledgerBalance=18629], BalanceMismatch[accountId=a2db032c-6486-4095-b3a5-d874db0dd21c, cachedBalance=32875, ledgerBalance=-66366], BalanceMismatch[accountId=cb8c8f9d-4f10-4634-90b4-c658ba7e4c88, cachedBalance=34573, ledgerBalance=24352], BalanceMismatch[accountId=dbe92df9-0e1c-4d9d-b153-8bce2c93e311, cachedBalance=1146, ledgerBalance=44361], BalanceMismatch[accountId=e8295d63-e06a-4253-81c0-29ac20a3c41d, cachedBalance=14735, ledgerBalance=15980]], negativeBalances=[NegativeBalance[accountId=a2db032c-6486-4095-b3a5-d874db0dd21c, cachedBalance=32875, ledgerBalance=-66366]]
+SHOWCASE BALANCES: cachedTotal=148784 expected=100000 lowestCached=1100
+---- failure message (from the XML) ----
+org.assertj.core.error.AssertJMultipleFailuresError: 
+Multiple Failures (2 failures)
+-- failure 1 --
+[money is neither created nor destroyed] 
+expected: 100000L
+ but was: 148784L
+at ConcurrentTransferShowcaseIntegrationTest.lambda$thousandConcurrentRandomTransfersKeepEveryInvariant$0(ConcurrentTransferShowcaseIntegrationTest.java:116)
+-- failure 2 --
+[reconciliation: isolation=repeatable read, transactions=904, accounts=10, unbalancedTransactions=[], entrySum=0, balanceMismatches=[BalanceMismatch[accountId=20209d07-8f9d-4b7b-a63e-3238c511b8d9, cachedBalance=14973, ledgerBalance=542], BalanceMismatch[accountId=331038a2-b487-464a-901e-8ee7db7fad1d, cachedBalance=1337, ledgerBalance=15492], BalanceMismatch[accountId=3b816f45-4a63-4cf9-80ee-71997c6ec315, cachedBalance=4779, ledgerBalance=13043], BalanceMismatch[accountId=42ec5779-ff2a-42c3-b7ec-fef09e36b000, cachedBalance=1100, ledgerBalance=25373], BalanceMismatch[accountId=633b14e7-c45e-4016-a21f-e8c1a1493d8a, cachedBalance=38310, ledgerBalance=8594], BalanceMismatch[accountId=820b6b6d-cbc2-48fb-b774-eba5592ac074, cachedBalance=4956, ledgerBalance=18629], BalanceMismatch[accountId=a2db032c-6486-4095-b3a5-d874db0dd21c, cachedBalance=32875, ledgerBalance=-66366], BalanceMismatch[accountId=cb8c8f9d-4f10-4634-90b4-c658ba7e4c88, cachedBalance=34573, ledgerBalance=24352], BalanceMismatch[accountId=dbe92df9-0e1c-4d9d-b153-8bce2c93e311, cachedBalance=1146, ledgerBalance=44361], BalanceMismatch[accountId=e8295d63-e06a-4253-81c0-29ac20a3c41d, cachedBalance=14735, ledgerBalance=15980]], negativeBalances=[NegativeBalance[accountId=a2db032c-6486-4095-b3a5-d874db0dd21c, cachedBalance=32875, ledgerBalance=-66366]]] 
+Expecting value to be true but was false
+at ConcurrentTransferShowcaseIntegrationTest.lambda$thousandConcurrentRandomTransfersKeepEveryInvariant$0(ConcurrentTransferShowcaseIntegrationTest.java:119)
+---- note ----
+An earlier identical run (same test files, not yet committed, same main code) also failed: success=960, insufficientFunds=40, otherFailures={}, cached balances total 174086 instead of 100000, 10 of 10 accounts with cached != ledger balance, 3 accounts with a negative ledger-derived balance. The exact figures differ between runs because thread interleaving differs; the failure kind does not.
