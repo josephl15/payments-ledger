@@ -192,3 +192,75 @@ Phase 3 test classes (tests from the XML):
 
 - Found while writing `AtomicityIntegrationTest`: stubbing the injected `LedgerPostingService` field called the real method through the transactional proxy outside a transaction and failed on MANDATORY; the leftover Mockito matchers then made the next test fail misleadingly. Fixed by stubbing the spy behind the proxy (`AopTestUtils.getTargetObject`). This was a test-code error, not a product bug.
 - Nothing else failed on the first run of the new product code: the 33 other new tests passed the first time they ran.
+
+## Phase 4: Concurrency and reconciliation core
+
+### Run details
+
+Date: 2026-09-29
+Commits (in order): `2d38c46` ReconciliationService; `e0e87fa` RED, the concurrency showcase test; `50ac4ee` RED evidence file; `8c4946b` GREEN, ordered `SELECT ... FOR UPDATE`; `18e5790` deadlock test, its mutation partner and the disabled locking-off demonstration. The repeat runs and the full suite below ran on the clean tree at `18e5790` (only documentation files were edited afterwards).
+
+Commands run for this entry (Git Bash, Windows 11, `JAVA_HOME` set to the JDK 21 install, Docker CLI on PATH, real PostgreSQL 16.15 through Testcontainers):
+
+- `./gradlew cleanTest test --tests '*ConcurrentTransferShowcaseIntegrationTest'` twice on the naive lock body (RED; output in docs/evidence/phase-4-red-naive-lock.txt)
+- the same test after the fix (GREEN), then the full suite once before committing the fix (122 passing lines)
+- the `@Disabled` demonstration run once by hand with the annotation temporarily removed (docs/evidence/phase-4-locking-off-demo.txt), then restored
+- six consecutive `./gradlew cleanTest test --tests ...` runs of the five concurrency and locking classes (docs/evidence/phase-4-repeat-runs.txt)
+- `./gradlew cleanTest test --console=plain` for the full suite (docs/evidence/phase-4-test-output.txt), plus a script summing `tests`, `skipped`, `failures` and `errors` from every `build/test-results/test/*.xml`
+
+### Showcase parameters
+
+10 customer accounts opened by one user and each funded with a 10,000 pence deposit (total 100,000 pence); 1,000 transfers with amounts 1 to 5,000 pence between random distinct accounts, inputs generated up front from `new Random(20260929)`; 16 worker threads released together by a start latch; Hikari pool 20 in the test profile; each result read with a 60 second timeout; `@Timeout(120)`. Deadlock test: 2 accounts of 1,000,000 pence, 400 alternating A-to-B and B-to-A transfers of 1 to 100 pence (seed 7654321), 16 threads.
+
+### The red-then-green pair
+
+- RED, `e0e87fa` (test only), run against the Phase 3 `AccountLockService` body, which takes no row lock. It failed. Committed run (docs/evidence/phase-4-red-naive-lock.txt): 894 transfers succeeded, 106 were refused for insufficient funds, 0 unexpected exceptions, and the cached balances added up to 148,784 pence when 100,000 existed (48,784 pence created from nothing). All 10 accounts had a cached balance different from the sum of their entries, and one had a negative ledger-derived balance (-66,366) while its cache was positive (an overdraft that got past the funds check). An earlier identical run failed the same way: 960 succeeded, 40 refused, cached total 174,086, 10 of 10 mismatched, 3 accounts negative in the ledger. Every transaction still summed to zero and the entry total was zero, so the ledger itself stayed balanced and only the cache and the funds decisions were wrong. No exception was thrown and the database `CHECK (balance_minor >= 0)` never fired; the symptom was silent drift, not constraint violations.
+- GREEN, `8c4946b`: `AccountLockService.lock` became one `SELECT * FROM accounts WHERE id IN (:ids) AND type = 'CUSTOMER' ORDER BY id FOR UPDATE`. The same showcase then passed (for example 829 succeeded, 171 refused, cached total 100,000, reconciliation clean).
+- Locking-off demonstration (test-scope naive lock, real code unchanged; docs/evidence/phase-4-locking-off-demo.txt): failed as expected with 872 succeeded, 128 refused, cached total 121,747 instead of 100,000. Kept as `LockingOffDemoIntegrationTest`, `@Disabled` with an explanatory comment.
+
+### Repeat runs
+
+Six consecutive runs of `ConcurrentTransferShowcaseIntegrationTest`, `DeadlockIntegrationTest`, `DeadlockMutationIntegrationTest`, `AccountLockServiceIntegrationTest` and `ReconciliationIntegrationTest`, each preceded by `cleanTest`: 6 of 6 passed, each run 15 tests, 0 skipped, 0 failures, 0 errors. Showcase outcomes over the six runs ranged from 809 to 843 successful transfers (157 to 191 refused for insufficient funds), with zero unexpected failures every time. The deadlock test completed 400 of 400 transfers in every run. Interleavings differ from run to run, so this is repeated evidence, not a proof.
+
+### Deadlock mutation check
+
+`DeadlockMutationIntegrationTest` runs the ping-pong scenario against a test-only lock service that locks one account at a time in alternating order (40 transfers, 8 threads). In the six repeat runs PostgreSQL aborted 27 to 31 of the 40 transfers with a deadlock (SQLSTATE 40P01), and in three of the runs 1 to 2 more failed a 5 second lock timeout (55P03); every run still reconciled clean. An earlier run of a larger version (200 transfers, 16 threads) had 173 deadlock aborts and 14 lock timeouts and took 49 seconds, which is why the test was made smaller.
+
+### Test results (full suite, `cleanTest test`, exit code 0)
+
+Integration tests (*IntegrationTest): 122 run, 1 skipped, 0 failed, 0 errors
+Unit tests (*Test): 3 run, 0 skipped, 0 failed, 0 errors
+Total: 125 tests, 1 skipped (`LockingOffDemoIntegrationTest`, `@Disabled` on purpose), 0 failed, 0 errors
+
+Source: docs/evidence/phase-4-test-output.txt and build/test-results/test/*.xml. The 109 Phase 1 to 3 tests are unchanged and still pass; Phase 4 added 16.
+
+| Class | Tests | What it proves |
+|-------|-------|----------------|
+| `ReconciliationIntegrationTest` | 6 | clean data from the real services reconciles clean at repeatable read; a lone entry with a wrong cache, an account with no entries but a cached balance, and a ledger-derived negative balance are each detected; empty scope; whole-ledger form runs |
+| `AccountLockServiceIntegrationTest` | 6 | the emitted SQL is one `for update` statement `order by id`; rows come back in PostgreSQL id order; a second session gets 55P03 on the locked row; a waiting transaction reads the committed balance (1,050); missing, system and empty requests are 404; locking outside a transaction fails |
+| `ConcurrentTransferShowcaseIntegrationTest` | 1 | the 1,000-transfer showcase |
+| `DeadlockIntegrationTest` | 1 | 400 opposite transfers all complete, balances exact, reconciliation clean |
+| `DeadlockMutationIntegrationTest` | 1 | the same scenario with alternating lock order produces 40P01 aborts |
+| `LockingOffDemoIntegrationTest` | 1 (skipped) | the showcase with locking off |
+
+### Completed
+
+- CONC-01: one ordered native `FOR UPDATE` query, ordering done in SQL (comparison with PostgreSQL order in `accountsComeBackInPostgresIdOrderNotJavaOrder`), READ COMMITTED unchanged.
+- CONC-02: showcase with start gate, seeded inputs, every Future read with a timeout, pool 20 for 16 threads, asserts successes above zero and that overdraft refusals occurred, then no negative balance, money conserved, reconciliation clean.
+- CONC-03: `@Disabled` demonstration using a test-scope override, run by hand once, result recorded above. There is no runtime toggle in shipped code.
+- CONC-04: deadlock test, with a mutation partner that proves it can fail.
+- CONC-05: six consecutive passing runs recorded.
+- CONC-06: docs/LEARNING_NOTES.md (lost update and row locks), docs/INTERVIEW_PREP.md entries 7 to 12, docs/DECISIONS.md entries 23 to 26 (pessimistic versus optimistic versus SERIALIZABLE).
+- RECON-01 to RECON-03: `ReconciliationService` (no endpoint), one `REPEATABLE_READ` read-only transaction, asserted at the end of the showcase and deadlock tests.
+
+### Not completed
+
+- Reconciliation is asserted over the ids each test created, not over the whole shared test database, which holds other tests' deliberately unbalanced rows (docs/DECISIONS.md, entry 25). `RECON-04` (admin endpoint) and `RECON-05` (clean after the whole suite) are outside this phase and outside the lean scope.
+- Not measured: throughput or latency. Elapsed times printed by the tests (about 2 seconds for 1,000 transfers on a laptop with a local container) are incidental and not a benchmark.
+- Optimistic locking and SERIALIZABLE were compared in writing only; neither was built or measured.
+- Concurrency through the HTTP layer was not tested; the tests call the services directly so they measure locking, not Tomcat.
+- No idempotency (Phase 5), no authentication (Phase 6). Nothing has run on GitHub Actions (no remote repository exists).
+
+### Bugs caught
+
+- None in the shipped code: every new test passed the first time it ran against the fixed code. One test-design problem was found by measuring: the first deadlock mutation test was too large (49 seconds, dominated by PostgreSQL's 1 second deadlock detection) and was cut to 40 transfers.

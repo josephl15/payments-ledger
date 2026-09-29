@@ -202,3 +202,23 @@ Deleting rows from the ledger is blocked by design, so tests cannot empty the ta
 
 - **Jackson turns `30.9` into `30` by default** for a `Long` field, and accepts the string `"3000"`. `application.yml` sets `spring.jackson.deserialization.accept-float-as-int: false` and `spring.jackson.mapper.allow-coercion-of-scalars: false`, and `LedgerApiIntegrationTest` checks that each bad form gets a 400.
 - **A broken Mockito stub can make the next test fail misleadingly.** When the first stubbing attempt went through the transactional proxy it threw, and Mockito's half-finished argument matchers stayed on the thread; the following test failed with "entries missing". The cause was in the first test, not the second.
+
+## Phase 4: the pieces used for the first time
+
+- **Native queries with `@Query(nativeQuery = true)`.** The SQL in the annotation is sent to the database as written, with `:ids` replaced by bind parameters (a collection becomes `?, ?, ?`). Used for the `FOR UPDATE` lock because JPQL would leave the SQL to Hibernate; here the text in the source is the text on the wire. A native query that returns whole rows (`SELECT *`) can still return entities.
+- **`JdbcTemplate` and `NamedParameterJdbcTemplate`.** Plain SQL without entities, used for reconciliation because it returns numbers, not objects to change. `IN (:ids)` with a `Set` of UUIDs expands to one `?` per id. They join the transaction that Spring opened, so the whole reconciliation sees one snapshot.
+- **`@Transactional(readOnly = true, isolation = REPEATABLE_READ)`.** Isolation is a property of the transaction; the default (READ COMMITTED) is left alone for money movement. If a `@Transactional` method calls another method of the same class, the second annotation is ignored (self-invocation), so `reconcile()` carries its own annotation.
+- **`TransactionTemplate`.** The programmatic form of `@Transactional`: `template.execute(status -> { ...code... })` opens a transaction, runs the block, commits. Used in the tests to hold a lock open on purpose.
+- **`@TestConfiguration`, `@Import` and `@Primary`.** How a test swaps one bean: a small configuration class declares a replacement bean marked `@Primary`, and one test class imports it. Only that class sees the replacement; it also gets its own Spring context (so it starts the application again, against the same database container).
+- **Executors, latches and futures.** `ExecutorService` runs tasks on a pool of threads; a `CountDownLatch(1)` used as a starting gate holds them all until released; `Future.get(timeout)` returns a task's result or rethrows its exception, which is how a failure inside a worker thread is noticed.
+
+### Traps to know (only the deadlock-timeout one was actually hit)
+
+- **A JdbcTemplate call on the transaction's own thread reuses the transaction's connection.** A test that wants to prove "another session cannot lock this row" must run its probe on a separate thread, or it would ask the question from inside the lock holder and get a false answer.
+- **`deadlock_timeout` makes deadlock tests slow.** PostgreSQL waits 1 second before it resolves each deadlock, so a large run of deliberately deadlocking transfers takes minutes; the mutation test therefore uses 40 transfers.
+- **`gradlew test` can say UP-TO-DATE.** Repeating a test run needs `cleanTest`, otherwise Gradle skips the tests and "passes" instantly.
+- **Run one concurrency scenario against the broken version first.** The first version of the showcase failed loudly against the naive lock with no exception at all, only wrong numbers; that is the evidence the assertions look at the right things.
+
+### Lost updates and row locks in five lines
+
+Two transfers read the same balance, each computes its own new value, and the second write overwrites the first: a lost update. `@Transactional` does not prevent it (it makes writes all-or-nothing, not one-at-a-time) and the default READ COMMITTED level does not either. `SELECT ... FOR UPDATE` makes the second transaction wait at the read until the first commits, then read the committed value, so read-check-write cannot interleave on one account. To avoid deadlock all transactions lock in the same order, which one `ORDER BY id` statement guarantees. Full explanations and interview questions: docs/INTERVIEW_PREP.md entries 7 to 12; the comparison with optimistic locking and SERIALIZABLE: docs/DECISIONS.md, entry 23.

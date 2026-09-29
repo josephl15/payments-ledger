@@ -80,7 +80,7 @@ The honest limit of the triggers: the table owner or a superuser can disable the
 
 1. checks that need no database: amount in range, currency GBP, from is not to;
 2. ownership of the paying account, by a yes/no query that loads no entity;
-3. `AccountLockService.lock` returns the two CUSTOMER accounts (a plain read until Phase 4 turns it into `SELECT ... ORDER BY id FOR UPDATE`);
+3. `AccountLockService.lock` returns the two CUSTOMER accounts (one `SELECT ... WHERE id IN (...) ORDER BY id FOR UPDATE`, so the rows are locked in a fixed order until the transaction ends);
 4. checks on those accounts: both ACTIVE, currency matches, paying balance covers the amount (422 if not);
 5. `LedgerPostingService.post` inserts the `ledger_transactions` row and two entries (`-amount` and `+amount`, asserted to sum to zero), then applies both amounts to the cached balances through `Account.applyDelta`;
 6. commit: transaction, entries and balances become visible together, or (any exception) none of them do.

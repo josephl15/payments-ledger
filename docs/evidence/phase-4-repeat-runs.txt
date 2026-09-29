@@ -1,0 +1,28 @@
+Phase 4 repeat runs: six consecutive runs of the concurrency and locking classes, each after cleanTest (so Gradle cannot report UP-TO-DATE).
+Command each time: ./gradlew cleanTest test --tests '*ConcurrentTransferShowcaseIntegrationTest' --tests '*DeadlockIntegrationTest' --tests '*DeadlockMutationIntegrationTest' --tests '*AccountLockServiceIntegrationTest' --tests '*ReconciliationIntegrationTest' --console=plain
+Commit: 18e5790 (clean tree). tests/skipped/failures/errors are summed from build/test-results/test/*.xml after each run.
+
+run 1 gradle_exit 0 tests 15 skipped 0 failures 0 errors 0
+    SHOWCASE OUTCOME (seed=20260929, accounts=10, transfers=1000, threads=16): success=821, insufficientFunds=179, otherFailures={}, elapsedMillis=2072
+    DEADLOCK TEST OUTCOME (seed=7654321, transfers=400, threads=16): success=400, insufficientFunds=0, otherFailures={}, elapsedMillis=1827
+    DEADLOCK MUTATION OUTCOME (seed=7654321, transfers=40, threads=8): success=9, insufficientFunds=0, otherFailures={CannotAcquireLockException [SQLSTATE 40P01]=31}, elapsedMillis=14074
+run 2 gradle_exit 0 tests 15 skipped 0 failures 0 errors 0
+    SHOWCASE OUTCOME (seed=20260929, accounts=10, transfers=1000, threads=16): success=809, insufficientFunds=191, otherFailures={}, elapsedMillis=1960
+    DEADLOCK TEST OUTCOME (seed=7654321, transfers=400, threads=16): success=400, insufficientFunds=0, otherFailures={}, elapsedMillis=1844
+    DEADLOCK MUTATION OUTCOME (seed=7654321, transfers=40, threads=8): success=9, insufficientFunds=0, otherFailures={CannotAcquireLockException [SQLSTATE 40P01]=31}, elapsedMillis=14073
+run 3 gradle_exit 0 tests 15 skipped 0 failures 0 errors 0
+    SHOWCASE OUTCOME (seed=20260929, accounts=10, transfers=1000, threads=16): success=814, insufficientFunds=186, otherFailures={}, elapsedMillis=1936
+    DEADLOCK TEST OUTCOME (seed=7654321, transfers=400, threads=16): success=400, insufficientFunds=0, otherFailures={}, elapsedMillis=1860
+    DEADLOCK MUTATION OUTCOME (seed=7654321, transfers=40, threads=8): success=11, insufficientFunds=0, otherFailures={CannotAcquireLockException [SQLSTATE 40P01]=27, PessimisticLockingFailureException [SQLSTATE 55P03]=2}, elapsedMillis=16089
+run 4 gradle_exit 0 tests 15 skipped 0 failures 0 errors 0
+    SHOWCASE OUTCOME (seed=20260929, accounts=10, transfers=1000, threads=16): success=832, insufficientFunds=168, otherFailures={}, elapsedMillis=2137
+    DEADLOCK TEST OUTCOME (seed=7654321, transfers=400, threads=16): success=400, insufficientFunds=0, otherFailures={}, elapsedMillis=1835
+    DEADLOCK MUTATION OUTCOME (seed=7654321, transfers=40, threads=8): success=10, insufficientFunds=0, otherFailures={CannotAcquireLockException [SQLSTATE 40P01]=28, PessimisticLockingFailureException [SQLSTATE 55P03]=2}, elapsedMillis=16087
+run 5 gradle_exit 0 tests 15 skipped 0 failures 0 errors 0
+    SHOWCASE OUTCOME (seed=20260929, accounts=10, transfers=1000, threads=16): success=843, insufficientFunds=157, otherFailures={}, elapsedMillis=2000
+    DEADLOCK TEST OUTCOME (seed=7654321, transfers=400, threads=16): success=400, insufficientFunds=0, otherFailures={}, elapsedMillis=1987
+    DEADLOCK MUTATION OUTCOME (seed=7654321, transfers=40, threads=8): success=11, insufficientFunds=0, otherFailures={CannotAcquireLockException [SQLSTATE 40P01]=29}, elapsedMillis=14086
+run 6 gradle_exit 0 tests 15 skipped 0 failures 0 errors 0
+    SHOWCASE OUTCOME (seed=20260929, accounts=10, transfers=1000, threads=16): success=834, insufficientFunds=166, otherFailures={}, elapsedMillis=2013
+    DEADLOCK TEST OUTCOME (seed=7654321, transfers=400, threads=16): success=400, insufficientFunds=0, otherFailures={}, elapsedMillis=1817
+    DEADLOCK MUTATION OUTCOME (seed=7654321, transfers=40, threads=8): success=11, insufficientFunds=0, otherFailures={CannotAcquireLockException [SQLSTATE 40P01]=28, PessimisticLockingFailureException [SQLSTATE 55P03]=1}, elapsedMillis=16089

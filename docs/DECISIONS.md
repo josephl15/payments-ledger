@@ -1,6 +1,6 @@
 # Decisions
 
-Every non-obvious decision is recorded here with the options considered, the choice and the trade-off. Later phases append new entries; an entry is not rewritten when a decision changes, a new entry supersedes it. Entries 1 to 11 are from Phase 1 (setup and toolchain), entries 12 to 17 from Phase 2 (schema, triggers and domain model), entries 18 onwards from Phase 3 (accounts, deposits and transfers).
+Every non-obvious decision is recorded here with the options considered, the choice and the trade-off. Later phases append new entries; an entry is not rewritten when a decision changes, a new entry supersedes it. Entries 1 to 11 are from Phase 1 (setup and toolchain), entries 12 to 17 from Phase 2 (schema, triggers and domain model), entries 18 to 22 from Phase 3 (accounts, deposits and transfers), entries 23 to 26 from Phase 4 (locking, reconciliation and the concurrency tests).
 
 ## 1. Stay on Spring Boot 3.5.16, which is past open-source end of life
 
@@ -382,3 +382,58 @@ Anyone can claim to be anyone until Phase 6. That is stated in the README and th
 `AtomicityIntegrationTest` spies on the posting service, lets the real post run, flushes, checks that the entries and the new balance are visible inside the transaction, then throws. Afterwards, from another connection, the entries, the transaction row and the balances must be as before. To confirm the test is not vacuous, `@Transactional` was removed from the service methods (both tests failed with IllegalTransactionStateException because the helpers are MANDATORY) and then MANDATORY was loosened on the helpers as well (both tests still failed, because the flow no longer ran as one unit). Both edits were reverted.
 
 **Scoping of the sum checks.** The shared test database also contains other test classes' deliberately corrupted and half-cleaned rows (entry 16), so "the ledger sums to zero" is asserted over the transactions created by the test's own user, not over the whole table. A whole-database check belongs to reconciliation in Phase 4.
+
+## 23. Concurrency control: pessimistic row locks under READ COMMITTED, not optimistic locking or SERIALIZABLE
+
+**Phase:** 4 | **Date:** 2026-09-29 | **Status:** Accepted
+
+**Context**
+Two simultaneous transfers on one account each read the balance, check funds and write back; without protection one write silently overwrites the other (a lost update, recorded in docs/evidence/phase-4-red-naive-lock.txt). Something has to make read-check-write on an account effectively one step.
+
+**Options**
+- Pessimistic locking: `SELECT ... FOR UPDATE` on the accounts at the start of the transaction, so a competitor waits.
+- Optimistic locking: a `@Version` column; a conflicting write fails at commit and the caller retries.
+- SERIALIZABLE isolation for the whole transfer: PostgreSQL detects conflicting patterns and aborts one transaction with a serialisation error, and the caller retries.
+
+**Choice**
+Pessimistic, at the default READ COMMITTED level. Money accounts are exactly the case with real contention (a payroll account, a shared account), where "wait your turn" is cheaper and simpler than "fail and redo". The funds check then runs on a row nobody else can change, so it is a plain `if`. There is no retry logic to write or get wrong. Deadlock is prevented by locking in one global order (entry 24), not handled after the fact.
+
+**Trade-off**
+Transactions on the same account queue, so throughput on one hot account is limited to one transfer at a time; locks are held until commit, so the transaction must stay short. Optimistic locking would allow more parallelism when conflicts are rare but needs retry code and produces user-visible failures under contention. SERIALIZABLE is the most general and needs no explicit locks, but it aborts more work, needs retries everywhere, and hides which rows matter, which is harder to explain. The 5 second `lock_timeout` on every connection (application.yml) turns an unexpectedly long wait into an error rather than a hang.
+
+**Revisit if**
+Accounts are rarely contended and throughput matters more than simplicity (then optimistic with bounded retries), or the workload grows beyond one database (then the locking model changes entirely).
+
+## 24. The lock is one native query with ORDER BY id, and it is the first load of the accounts
+
+**Phase:** 4 | **Date:** 2026-09-29 | **Status:** Accepted
+
+**Choice**
+`AccountRepository.lockCustomerAccountsOrderedById` is a native query: `SELECT * FROM accounts WHERE id IN (:ids) AND type = 'CUSTOMER' ORDER BY id FOR UPDATE`. One statement locks every requested account, and PostgreSQL takes the row locks in the order it returns the rows, so all transactions lock the same accounts in the same order and cannot deadlock on each other. The ordering is done by the database, never by sorting UUIDs in Java, because Java's `UUID.compareTo` (signed 64-bit halves) and PostgreSQL's `uuid` ordering (unsigned bytes) can disagree; a test compares the returned order with PostgreSQL's own. Native SQL, not JPQL with a lock mode, so the text in the source is what reaches the database; a test captures the emitted statement.
+
+The query must be the first load of these accounts in the transaction: Hibernate caches loaded entities per transaction, and a query that finds an entity already loaded locks the row but returns the old in-memory copy, with a stale balance. The services therefore check ownership with `existsByIdAndOwnerUserId` (a yes/no query that loads nothing) and check funds only on the accounts `lock()` returns. Fewer rows than requested ids (missing, or a system account) gives the existing 404.
+
+**Trade-off**
+The "first load" rule is a convention held by the call order and the comments, not enforced by the type system; the concurrency showcase would catch a violation because balances would drift. Native SQL is tied to PostgreSQL. `SELECT *` relies on the entity matching the table, which `ddl-auto=validate` already checks at startup.
+
+## 25. Reconciliation is set-based and runs in one REPEATABLE READ, read-only transaction; tests scope it
+
+**Phase:** 4 | **Date:** 2026-09-29 | **Status:** Accepted
+
+**Choice**
+`ReconciliationService` runs aggregate queries (per-transaction sums, the global entry sum, cached versus ledger-derived balance per customer account, negative balances) in one `@Transactional(readOnly = true, isolation = REPEATABLE_READ)`. Under READ COMMITTED each query would see a different moment, so a transfer committing between two of them could make a healthy ledger look broken; REPEATABLE READ gives all of them the same snapshot without blocking writers. The accounts query uses a LEFT JOIN so an account with no entries (but a wrong cached balance) is still checked. The negative check looks at the ledger-derived balance too, because the cached balance cannot be negative (a CHECK stops it). There is no HTTP endpoint (out of the lean scope).
+
+**Scoping, stated honestly.** The shared test database holds other tests' deliberately unbalanced rows (entry 16), so a whole-ledger check cannot be asserted clean in the test suite. `ReconciliationScope.of(accountIds, transactionIds)` restricts the checks to the ids a test created; `wholeLedger()` is what a real run would use, and in the tests its unscoped queries are only checked for running and reporting the isolation level. The scoped tests still detect each kind of injected corruption (using the ReplicaRole helper, then cleaned up).
+
+**Trade-off**
+A long reconciliation over a large ledger holds a snapshot open (it delays vacuum) and scans whole tables; for a large system it would run against a replica or per time window. Reports keep at most 100 examples per check.
+
+## 26. The concurrency tests must be able to fail, and the ways they fail are test-scope only
+
+**Phase:** 4 | **Date:** 2026-09-29 | **Status:** Accepted
+
+**Choice**
+Process: the showcase test was committed and run against the naive lock body first (RED, commit e0e87fa, evidence in docs/evidence/phase-4-red-naive-lock.txt), and only then was the ordered `FOR UPDATE` committed (GREEN, commit 8c4946b). Design rules taken from the pitfalls list: a start gate so threads really begin together, a seeded Random for the inputs (only the interleaving is left to chance), every Future read with a timeout, the Hikari pool (20) at least the thread count (16), `@Timeout` on each test, and assertions that at least one transfer succeeded and that some were refused, so an all-rejected run cannot pass. Broken lock services (no lock; locks in alternating order) live in `src/test` and are switched on by importing a `@TestConfiguration` into one test class; there is no property, profile or flag in the shipped code that turns locking off. The deadlock test has a mutation partner that must see PostgreSQL abort transactions with SQLSTATE 40P01, and a `@Disabled` locking-off demonstration re-runs the showcase with the naive lock (run once by hand, result recorded).
+
+**Trade-off**
+The concurrency tests take a few seconds (the deadlock mutation test about 15 s, because PostgreSQL waits `deadlock_timeout`, 1 s by default, before resolving each deadlock). Thread interleaving is not reproducible, so a passing run is evidence rather than proof; the tests are repeated (docs/CV_EVIDENCE.md gives the count) and the mechanism is separately proven by the lock-service tests (a NOWAIT probe from a second session sees the row locked).
