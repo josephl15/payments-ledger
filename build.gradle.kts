@@ -34,6 +34,8 @@ dependencies {
 
     // PostgreSQL JDBC driver, needed only at runtime.
     runtimeOnly("org.postgresql:postgresql")
+    // Tests import org.postgresql.util.PSQLException to read the SQLSTATE and the violated constraint name.
+    testImplementation("org.postgresql:postgresql")
 
     // Test stack: JUnit 5, AssertJ, Mockito, Spring Test (all via the Boot test starter).
     testImplementation("org.springframework.boot:spring-boot-starter-test")
