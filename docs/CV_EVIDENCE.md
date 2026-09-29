@@ -380,3 +380,41 @@ Source: docs/evidence/phase-6-test-output.txt and build/test-results/test/*.xml.
 - Two `ToolchainSmokeIntegrationTest` tests failed on the first full run (`unknownPathReturnsProblemJson`, `onlyHealthEndpointIsExposed`) because an unauthenticated caller now gets 401 instead of 404 for unknown and unexposed paths. That is the intended new behaviour, so the tests were changed to send a token (and a new test pins the 401); the suite then passed.
 - Test harness: the first version of the fail-fast test passed settings as default properties, which application.yml overrides, so it connected to the wrong database; a control test with a valid secret exposed it, and the settings are now passed as command-line arguments.
 
+## Final: presentation, clean-clone check and last full run (lean scope phase 7)
+
+### Run details
+
+Date: 2026-09-29
+Commits: `340010e` (test-only fix found by the clean-clone check, see Bugs caught), then documentation commits. The final full run below ran on a tree whose `src/` is identical to `340010e`.
+
+Commands run for this entry (Git Bash, Windows 11, `JAVA_HOME` set to the JDK 21 install, Docker CLI on PATH, real PostgreSQL 16.15 through Testcontainers):
+
+- `./gradlew cleanTest test --console=plain` for the full suite (docs/evidence/final-test-output.txt, exit code 0, BUILD SUCCESSFUL), plus a script summing `tests`, `skipped`, `failures` and `errors` from every `build/test-results/test/*.xml`, grouped by class-name suffix
+- a clean-clone check (docs/evidence/final-clean-clone-check.txt): `git clone` of the local repository into a scratch directory, then from the clone `./gradlew build` with a throwaway `LEDGER_JWT_SECRET` exported, `docker compose up --build -d --wait`, a health request, a register / login / open accounts / deposit / transfer / retry / overdraft walkthrough with curl, and `docker compose down -v`. The clone was deleted afterwards.
+
+### Test results (full suite, `cleanTest test`, exit code 0)
+
+Integration tests (*IntegrationTest): 171 run, 1 skipped, 0 failed, 0 errors
+Unit tests (*Test): 17 run, 0 skipped, 0 failed, 0 errors
+Total: 188 tests, 1 skipped (`LockingOffDemoIntegrationTest`, `@Disabled` on purpose), 0 failed, 0 errors
+
+Source: docs/evidence/final-test-output.txt and build/test-results/test/*.xml. The count is unchanged from Phase 6 (188): no test was added or removed in this phase, one test was changed (see Bugs caught). The fresh clone gave the same totals (171 / 17 / 188, 1 skipped).
+
+### Clean-clone result
+
+- From a fresh clone at `340010e`, `./gradlew build` succeeded (BUILD SUCCESSFUL in 58s, tests included) and produced `build/libs/app.jar`.
+- `docker compose config` without `LEDGER_JWT_SECRET` stops with the message asking for it; with it, `docker compose up --build -d --wait` returned with both containers healthy, `/actuator/health` returned `{"status":"UP"}`, and an unauthenticated request returned 401.
+- The walkthrough worked as the README describes: register 201, login returns `accessToken`, two accounts opened, a 10,000 pence deposit gave a balanced pair of entries (-10000 on `EXTERNAL_FUNDING`, +10000 on the account), a 2,500 pence transfer left balances 7,500 and 2,500, the same transfer with the same `Idempotency-Key` returned the same transaction id with `Idempotent-Replayed: true` and balances did not move again, and a 999,999 pence transfer returned 422 "Insufficient funds".
+- Not checked in the clone: PowerShell forms of the commands, a `.env` file instead of an exported variable, and plain foreground `docker compose up`. The README says which forms were run.
+- CI: the GitHub Actions workflow is committed and has never run; no CI result exists.
+
+### Bugs caught
+
+- Found only by the clean-clone check: `JwtSecretFailFastTest.aMissingSecretStopsTheContextFromStarting` failed when the developer had `LEDGER_JWT_SECRET` exported (the README tells them to), because the operating system environment supplied the secret the test wanted to be absent. It passed in every earlier run because the variable was not set in the shell. Test-only fix in `340010e`: the OS environment property source is removed from that test's context. No product code changed.
+
+### Not completed
+
+- Reversals, an audit log and an admin reconciliation endpoint were dropped from scope (.planning/LEAN-SCOPE.md), so their requirements are not met.
+- The GitHub repository, CI run and the Phase 1 red-then-green CI proof (plan 01-04) are deferred by the user.
+- The two Mermaid diagrams in the README and the one in docs/architecture.md have not been rendered by any tool here; their syntax was written to the Mermaid documentation only.
+- Not measured: throughput or latency. Not deployed anywhere; the README's AWS/Azure section is a description only.
