@@ -1,0 +1,118 @@
+ Image paymentledgerpersonalproject-app Building 
+#1 [internal] load local bake definitions
+#1 reading from stdin 601B done
+#1 DONE 0.0s
+
+#2 [internal] load build definition from Dockerfile
+#2 transferring dockerfile: 1.52kB done
+#2 DONE 0.0s
+
+#3 resolve image config for docker-image://docker.io/docker/dockerfile:1
+#3 DONE 0.5s
+
+#4 docker-image://docker.io/docker/dockerfile:1@sha256:ecfaec9ed6d810b56388c508f4121597bfbba70d41a6dfeee4d8cad5f295fc32
+#4 resolve docker.io/docker/dockerfile:1@sha256:ecfaec9ed6d810b56388c508f4121597bfbba70d41a6dfeee4d8cad5f295fc32 0.0s done
+#4 CACHED
+
+#5 [internal] load metadata for docker.io/library/eclipse-temurin:21-jre-noble
+#5 DONE 0.4s
+
+#6 [internal] load metadata for docker.io/library/eclipse-temurin:21-jdk-noble
+#6 DONE 0.4s
+
+#7 [internal] load .dockerignore
+#7 transferring context: 94B done
+#7 DONE 0.0s
+
+#8 [stage-1 1/4] FROM docker.io/library/eclipse-temurin:21-jre-noble@sha256:0c324fbe2e1455c3159184717440f3b52906ef82a39c4a6efc9edb401d31971a
+#8 resolve docker.io/library/eclipse-temurin:21-jre-noble@sha256:0c324fbe2e1455c3159184717440f3b52906ef82a39c4a6efc9edb401d31971a 0.0s done
+#8 DONE 0.0s
+
+#9 [build 1/7] FROM docker.io/library/eclipse-temurin:21-jdk-noble@sha256:1afee26c547e1aa89f47404854dd09203b8bd35a2be269e16bdfd69c4a2c2b50
+#9 resolve docker.io/library/eclipse-temurin:21-jdk-noble@sha256:1afee26c547e1aa89f47404854dd09203b8bd35a2be269e16bdfd69c4a2c2b50 0.0s done
+#9 DONE 0.0s
+
+#10 [internal] load build context
+#10 transferring context: 2.19kB done
+#10 DONE 0.0s
+
+#11 [build 6/7] COPY src src
+#11 CACHED
+
+#12 [build 4/7] COPY gradle gradle
+#12 CACHED
+
+#13 [build 7/7] RUN ./gradlew bootJar -x test --no-daemon
+#13 CACHED
+
+#14 [build 2/7] WORKDIR /workspace
+#14 CACHED
+
+#15 [build 3/7] COPY gradlew settings.gradle.kts build.gradle.kts ./
+#15 CACHED
+
+#16 [stage-1 2/4] RUN useradd --system --uid 10001 --no-create-home ledger
+#16 CACHED
+
+#17 [stage-1 3/4] WORKDIR /app
+#17 CACHED
+
+#18 [build 5/7] RUN chmod +x gradlew
+#18 CACHED
+
+#19 [stage-1 4/4] COPY --from=build /workspace/build/libs/app.jar app.jar
+#19 CACHED
+
+#20 exporting to image
+#20 exporting layers done
+#20 exporting manifest sha256:050a77f7f3809ee6adc880ea95880bad09f03327ed981bab2aed341c1747b232 done
+#20 exporting config sha256:660c6f501bf4ead489a7077c9cd4b80382b44cba67886b0f016bee2590dcf895 done
+#20 exporting attestation manifest sha256:10e6de5e1783d0c430ddd9b57f287d6fbf0dfbfb244bfff38de796f3fb591226
+#20 exporting attestation manifest sha256:10e6de5e1783d0c430ddd9b57f287d6fbf0dfbfb244bfff38de796f3fb591226 0.0s done
+#20 exporting manifest list sha256:82c9e94764a87bffc8b386e14627e1215c903d62de18b0984a01c66a2ef6d881 done
+#20 naming to docker.io/library/paymentledgerpersonalproject-app:latest done
+#20 unpacking to docker.io/library/paymentledgerpersonalproject-app:latest done
+#20 DONE 0.1s
+
+#21 resolving provenance for metadata file
+#21 DONE 0.0s
+ Image paymentledgerpersonalproject-app Built 
+ Network paymentledgerpersonalproject_default Creating 
+ Volume paymentledgerpersonalproject_pgdata Creating 
+ Volume paymentledgerpersonalproject_pgdata Creating 
+ Network paymentledgerpersonalproject_default Creating 
+ Volume paymentledgerpersonalproject_pgdata Created 
+ Volume paymentledgerpersonalproject_pgdata Created 
+ Network paymentledgerpersonalproject_default Created 
+ Network paymentledgerpersonalproject_default Created 
+ Container paymentledgerpersonalproject-db-1 Creating 
+ Container paymentledgerpersonalproject-db-1 Created 
+ Container paymentledgerpersonalproject-app-1 Creating 
+ Container paymentledgerpersonalproject-app-1 Created 
+ Container paymentledgerpersonalproject-db-1 Starting 
+ Container paymentledgerpersonalproject-db-1 Started 
+ Container paymentledgerpersonalproject-db-1 Waiting 
+ Container paymentledgerpersonalproject-db-1 Healthy 
+ Container paymentledgerpersonalproject-app-1 Starting 
+ Container paymentledgerpersonalproject-app-1 Started 
+ Container paymentledgerpersonalproject-app-1 Waiting 
+ Container paymentledgerpersonalproject-db-1 Waiting 
+ Container paymentledgerpersonalproject-db-1 Healthy 
+ Container paymentledgerpersonalproject-app-1 Healthy 
+app-1  | 2026-09-29T18:50:37.536Z  INFO 1 --- [ledger-service] [           main] o.f.core.internal.command.DbMigrate      : Migrating schema "public" to version "1 - baseline"
+NAME                                 IMAGE                              COMMAND                  SERVICE   CREATED          STATUS                    PORTS
+paymentledgerpersonalproject-app-1   paymentledgerpersonalproject-app   "java -jar /app/app.…"   app       13 seconds ago   Up 6 seconds (healthy)    127.0.0.1:8080->8080/tcp
+paymentledgerpersonalproject-db-1    postgres:16.15-alpine              "docker-entrypoint.s…"   db        13 seconds ago   Up 12 seconds (healthy)   127.0.0.1:5432->5432/tcp
+ Container paymentledgerpersonalproject-app-1 Stopping 
+ Container paymentledgerpersonalproject-app-1 Stopped 
+ Container paymentledgerpersonalproject-app-1 Removing 
+ Container paymentledgerpersonalproject-app-1 Removed 
+ Container paymentledgerpersonalproject-db-1 Stopping 
+ Container paymentledgerpersonalproject-db-1 Stopped 
+ Container paymentledgerpersonalproject-db-1 Removing 
+ Container paymentledgerpersonalproject-db-1 Removed 
+ Volume paymentledgerpersonalproject_pgdata Removing 
+ Network paymentledgerpersonalproject_default Removing 
+ Volume paymentledgerpersonalproject_pgdata Removed 
+ Network paymentledgerpersonalproject_default Removed 
+up=0 health={"status":"UP"} flyway=1|t uid=10001

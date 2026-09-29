@@ -1,0 +1,44 @@
+> Task :cleanTest
+> Task :compileJava UP-TO-DATE
+> Task :processResources UP-TO-DATE
+> Task :classes UP-TO-DATE
+> Task :compileTestJava UP-TO-DATE
+> Task :processTestResources UP-TO-DATE
+> Task :testClasses UP-TO-DATE
+
+> Task :test
+
+PostgresImageTagConsistencyTest > composeUsesTheSamePostgresImageAsTestcontainers() PASSED
+
+OpenJDK 64-Bit Server VM warning: Sharing is only supported for boot loader classes because bootstrap classpath has been appended
+
+> Task :test
+
+ToolchainSmokeIntegrationTest > noH2OnClasspath() PASSED
+
+ToolchainSmokeIntegrationTest > flywayAppliedBaseline() PASSED
+
+ToolchainSmokeIntegrationTest > unknownPathReturnsProblemJson() PASSED
+
+ToolchainSmokeIntegrationTest > lockTimeoutFiresOnRealLockWait() PASSED
+
+ToolchainSmokeIntegrationTest > onlyHealthEndpointIsExposed() PASSED
+
+ToolchainSmokeIntegrationTest > lockTimeoutAppliedToPoolConnections() PASSED
+
+ToolchainSmokeIntegrationTest > configIsStrict() PASSED
+
+ToolchainSmokeIntegrationTest > healthIsUp() PASSED
+
+ToolchainSmokeIntegrationTest > hikariPoolIsExplicitForTests() PASSED
+
+ToolchainSmokeIntegrationTest > runsAgainstPostgres16() PASSED
+
+2026-09-29T19:50:08.599+01:00  INFO 9504 --- [ledger-service] [ionShutdownHook] o.s.b.w.e.tomcat.GracefulShutdown        : Commencing graceful shutdown. Waiting for active requests to complete
+2026-09-29T19:50:08.605+01:00  INFO 9504 --- [ledger-service] [tomcat-shutdown] o.s.b.w.e.tomcat.GracefulShutdown        : Graceful shutdown complete
+2026-09-29T19:50:08.609+01:00  INFO 9504 --- [ledger-service] [ionShutdownHook] j.LocalContainerEntityManagerFactoryBean : Closing JPA EntityManagerFactory for persistence unit 'default'
+2026-09-29T19:50:08.611+01:00  INFO 9504 --- [ledger-service] [ionShutdownHook] com.zaxxer.hikari.HikariDataSource       : HikariPool-1 - Shutdown initiated...
+2026-09-29T19:50:08.617+01:00  INFO 9504 --- [ledger-service] [ionShutdownHook] com.zaxxer.hikari.HikariDataSource       : HikariPool-1 - Shutdown completed.
+
+BUILD SUCCESSFUL in 10s
+6 actionable tasks: 2 executed, 4 up-to-date
