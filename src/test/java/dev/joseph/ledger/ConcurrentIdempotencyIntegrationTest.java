@@ -2,14 +2,23 @@ package dev.joseph.ledger;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.SoftAssertions.assertSoftly;
+import static org.awaitility.Awaitility.await;
 
 import com.fasterxml.jackson.databind.JsonNode;
+import dev.joseph.ledger.service.ActingUser;
+import dev.joseph.ledger.service.IdempotentExecutor;
+import dev.joseph.ledger.service.IdempotentOutcome;
+import dev.joseph.ledger.service.PostedTransaction;
 import dev.joseph.ledger.service.ReconciliationReport;
 import dev.joseph.ledger.service.ReconciliationScope;
 import dev.joseph.ledger.service.ReconciliationService;
+import dev.joseph.ledger.service.StoredResponse;
+import dev.joseph.ledger.service.TransferCommand;
+import dev.joseph.ledger.service.TransferService;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.Callable;
@@ -46,6 +55,12 @@ class ConcurrentIdempotencyIntegrationTest extends AbstractIdempotencyIntegratio
 
     @Autowired
     ReconciliationService reconciliation;
+
+    @Autowired
+    IdempotentExecutor executor;
+
+    @Autowired
+    TransferService transferService;
 
     /** What one request came back with. */
     record Reply(int status, boolean replayed, JsonNode body) {}
@@ -220,5 +235,66 @@ class ConcurrentIdempotencyIntegrationTest extends AbstractIdempotencyIntegratio
             softly.assertThat(report.isClean()).as("reconciliation: " + report.summary()).isTrue();
         });
         assertThat(replies).hasSize(REQUESTS);
+    }
+
+    /**
+     * The blocking behaviour, made deterministic instead of hoped for. The first request is held open after it has
+     * done its work but before it commits. A duplicate arrives meanwhile: PostgreSQL must make its INSERT of the same
+     * key wait (we look for that wait in pg_stat_activity), and once the first request commits the duplicate must
+     * fail with the unique violation and answer with the first request's stored result.
+     */
+    @Test
+    @Timeout(60)
+    void aDuplicateArrivingWhileTheFirstTransactionIsOpenWaitsThenReplaysItsResult() throws Exception {
+        UUID user = newUser();
+        UUID from = newAccount(user, INITIAL_BALANCE);
+        UUID to = newAccount(newUser(), 0);
+        String key = "held-open-" + UUID.randomUUID();
+        ActingUser actor = new ActingUser(user);
+        TransferCommand command = new TransferCommand(from, to, AMOUNT, "GBP", null);
+        String requestBody = transferBody(from, to, AMOUNT);
+        CountDownLatch workDone = new CountDownLatch(1);
+        CountDownLatch commitNow = new CountDownLatch(1);
+        ExecutorService pool = Executors.newFixedThreadPool(2);
+        try {
+            Future<StoredResponse> first = pool.submit(() -> executor.execute(
+                    actor, key, "POST", "/api/transfers", requestBody, () -> {
+                        PostedTransaction posted = transferService.transfer(actor, command);
+                        workDone.countDown();
+                        try {
+                            commitNow.await(30, TimeUnit.SECONDS);
+                        } catch (InterruptedException e) {
+                            throw new IllegalStateException(e);
+                        }
+                        return new IdempotentOutcome(
+                                201, Map.of("id", posted.transaction().getId().toString()), posted.transaction().getId());
+                    }));
+            assertThat(workDone.await(10, TimeUnit.SECONDS)).as("first request reached the end of its work").isTrue();
+
+            Future<StoredResponse> duplicate = pool.submit(() -> executor.execute(
+                    actor, key, "POST", "/api/transfers", requestBody, () -> {
+                        throw new AssertionError("the duplicate must never run the business call");
+                    }));
+            // Wait until PostgreSQL reports an INSERT into idempotency_keys blocked on another transaction's id.
+            await().atMost(10, TimeUnit.SECONDS).until(() -> jdbc.queryForObject(
+                            "SELECT count(*) FROM pg_stat_activity WHERE wait_event_type = 'Lock' "
+                                    + "AND wait_event = 'transactionid' AND query ILIKE 'insert into idempotency_keys%'",
+                            Long.class)
+                    >= 1);
+            assertThat(duplicate.isDone()).as("the duplicate is still waiting").isFalse();
+
+            commitNow.countDown();
+            StoredResponse winnerResponse = first.get(30, TimeUnit.SECONDS);
+            StoredResponse duplicateResponse = duplicate.get(30, TimeUnit.SECONDS);
+
+            assertThat(winnerResponse.replayed()).isFalse();
+            assertThat(duplicateResponse.replayed()).isTrue();
+            assertThat(json.readTree(duplicateResponse.bodyJson())).isEqualTo(json.readTree(winnerResponse.bodyJson()));
+            assertThat(transactionCount(user, "TRANSFER")).isEqualTo(1);
+            assertThat(balance(from)).isEqualTo(INITIAL_BALANCE - AMOUNT);
+        } finally {
+            commitNow.countDown();
+            pool.shutdownNow();
+        }
     }
 }
