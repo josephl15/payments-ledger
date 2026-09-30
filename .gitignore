@@ -10,3 +10,7 @@ bin/
 # Tool artifacts (not project source)
 .gsd/
 .claude/worktrees/
+
+# Local AI-workflow files, not published
+.planning/
+.claude/

@@ -414,7 +414,7 @@ Source: docs/evidence/final-test-output.txt and build/test-results/test/*.xml. T
 
 ### Not completed
 
-- Reversals, an audit log and an admin reconciliation endpoint were dropped from scope (.planning/LEAN-SCOPE.md), so their requirements are not met.
+- Reversals, an audit log and an admin reconciliation endpoint were dropped from scope, so their requirements are not met.
 - The GitHub repository, CI run and the Phase 1 red-then-green CI proof (plan 01-04) are deferred by the user.
 - The two Mermaid diagrams in the README and the one in docs/architecture.md have not been rendered by any tool here; their syntax was written to the Mermaid documentation only.
 - Not measured: throughput or latency. Not deployed anywhere; the README's AWS/Azure section is a description only.

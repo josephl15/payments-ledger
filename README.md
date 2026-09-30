@@ -83,7 +83,7 @@ Tests that were made to fail on purpose, to show they can:
 - A test-only lock service that locks accounts in alternating order produces PostgreSQL deadlock aborts (`DeadlockMutationIntegrationTest`).
 - With the idempotency key made unique per request (so the constraint cannot fire), 20 identical transfers ran 20 times instead of once ([docs/evidence/phase-5-repeat-runs.txt](docs/evidence/phase-5-repeat-runs.txt)). That was a manual check, reverted, and is not automated.
 
-What is not built, stated plainly: there are **no reversals**, no audit log and no admin reconciliation endpoint (they were dropped from scope, see [.planning/LEAN-SCOPE.md](.planning/LEAN-SCOPE.md)). The schema still contains the `REVERSAL` transaction type, a unique link so a transaction could be reversed at most once, and an `audit_log` table, but no code uses them. Invariant 4 is enforced by the database triggers and tested; the way a mistake would be corrected (a new reversing transaction, never an edit) is a design intention that is listed as a possible extension, not something you can call.
+What is not built, stated plainly: there are **no reversals**, no audit log and no admin reconciliation endpoint (they were deliberately left out to keep the project small). The schema still contains the `REVERSAL` transaction type, a unique link so a transaction could be reversed at most once, and an `audit_log` table, but no code uses them. Invariant 4 is enforced by the database triggers and tested; the way a mistake would be corrected (a new reversing transaction, never an edit) is a design intention that is listed as a possible extension, not something you can call.
 
 ## Failure modes
 
